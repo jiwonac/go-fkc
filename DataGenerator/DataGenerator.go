@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"time"
 
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -29,9 +31,10 @@ type Point struct {
 // A point's group and the indices of its neighbors
 // Essentially the same content that will be stored in MongoDB
 type PointNeighbors struct {
-	index     int
-	group     int
-	neighbors []int
+	ID        primitive.ObjectID `bson:"_id,omitempty"`
+	Index     int                `bson:"index,omitempty"`
+	Group     int                `bson:"group,omitempty"`
+	Neighbors []int              `bson:"neighbors,omitempty"`
 }
 
 func main() {
@@ -54,7 +57,7 @@ func main() {
 // Returns a unique string identifier for the graph's parameters
 func getGraphID(n int, d int, m int, r float64) string {
 	str := "n" + strconv.Itoa(n) + "d" + strconv.Itoa(d) + "m" + strconv.Itoa(m)
-	return str + "r" + fmt.Sprintf("%f", r)
+	return str + "r" + strconv.Itoa(int(r*100))
 }
 
 func generatePoints(n int, d int, m int) []Point {
@@ -81,14 +84,14 @@ func adjacencyList(points []Point, r float64) []PointNeighbors {
 	for i := 0; i < n; i++ {
 		point := points[i]
 		adj := PointNeighbors{
-			index:     i,
-			group:     point.group,
-			neighbors: make([]int, 0),
+			Index:     i,
+			Group:     point.group,
+			Neighbors: make([]int, 0),
 		}
 		for j := 0; j < n; j++ {
 			other := points[j]
 			if dist(point.coord, other.coord) <= r {
-				adj.neighbors = append(adj.neighbors, j)
+				adj.Neighbors = append(adj.Neighbors, j)
 			}
 		}
 		adjList[i] = adj
@@ -101,9 +104,9 @@ func printStats(adjList []PointNeighbors, n int, m int) {
 	neighborCounts := make([]int, n)
 	for i := range adjList {
 		adj := adjList[i]
-		group := adj.group
+		group := adj.Group
 		groupCounts[group]++
-		neighborCounts[i] = len(adj.neighbors)
+		neighborCounts[i] = len(adj.Neighbors)
 	}
 	fmt.Printf("Group counts: %v\n", groupCounts)
 	sort.Ints(neighborCounts)
@@ -114,7 +117,7 @@ func printStats(adjList []PointNeighbors, n int, m int) {
 
 func storeMongo(adjList []PointNeighbors, db string, graphID string) {
 	// Connect to MongoDB
-	client, err := mongo.NewClient(options.Client().ApplyURI("mongodb://localhost:8888"))
+	client, err := mongo.NewClient(options.Client().ApplyURI("mongodb://localhost:27017"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -131,18 +134,28 @@ func storeMongo(adjList []PointNeighbors, db string, graphID string) {
 	collection := database.Collection(graphID)
 
 	// If the collection is already nonempty, then empty its contents
-	err = collection.Drop(ctx)
+	_, err = collection.DeleteMany(context.Background(), bson.M{})
 	handleError(err)
 
 	// Insert entries into collection
-	elements := make([]interface{}, len(adjList))
 	for i := range adjList {
-		elements[i] = adjList[i]
+		_, err = collection.InsertOne(context.Background(), adjList[i])
+		handleError(err)
 	}
-	_, err = collection.InsertMany(context.Background(), elements)
+
+	// Define the index model for the Index field
+	indexModel := mongo.IndexModel{
+		Keys: bson.M{
+			"index": 1,
+		},
+	}
+
+	// Create the index on the collection
+	_, err = collection.Indexes().CreateOne(context.Background(), indexModel)
 	handleError(err)
 }
 
+// Euclidean distance between two points
 func dist(foo []float64, bar []float64) float64 {
 	d := len(foo)
 	sumSquares := 0.0
@@ -153,6 +166,7 @@ func dist(foo []float64, bar []float64) float64 {
 	return math.Sqrt(sumSquares)
 }
 
+// Very basic error logging
 func handleError(err error) {
 	if err != nil {
 		log.Fatal(err)
