@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"go.mongodb.org/mongo-driver/mongo"
-	"golang.org/x/exp/maps"
 )
 
 /*
@@ -36,7 +35,10 @@ func SubmodularCover(dbName string, collectionName string, coverageReq int,
 	case 0:
 		return classicGreedy(collection, n, coverageTracker, groupTracker, threads)
 	case 1:
-		candidates := rangeSlice(n)
+		candidates := make(map[int]bool, n)
+		for i := 0; i < n; i++ {
+			candidates[i] = true
+		}
 		return lazyGreedy(collection, coverageTracker, groupReqs, threads, -1, candidates, nil)
 	case 2:
 		return disCover(collection, n, coverageTracker, groupReqs, threads, 0.2)
@@ -280,14 +282,18 @@ func greeDi(candidates map[int]bool, coverageTracker []int, groupTracker []int,
 	}()
 
 	// Filtered candidates = union of solutions from each thread
-	filteredCandidates := make(map[int]bool, len(candidates))
+	filteredCandidates := make([]int, len(candidates))
 	for distributedSolution := range c {
-		maps.Copy(filteredCandidates, distributedSolution)
+		filteredCandidates = append(filteredCandidates, distributedSolution...)
+	}
+	filteredCandidatesSet := make(map[int]bool, len(filteredCandidates))
+	for i := 0; i < len(filteredCandidates); i++ {
+		filteredCandidatesSet[filteredCandidates[i]] = true
 	}
 
 	// Run centralized greedy on the filtered candidates
 	return lazyGreedy(collection, coverageTracker, groupTracker, threads,
-		cardinalityConstraint, filteredCandidates, nil)
+		cardinalityConstraint, filteredCandidatesSet, nil)
 }
 
 func notSatisfied(coverageTracker []int, groupTracker []int) bool {
