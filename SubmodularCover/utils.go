@@ -79,6 +79,14 @@ func rangeSlice(n int) []int {
 	return result
 }
 
+func deleteAllFromSet(set map[int]bool, keys []int) map[int]bool {
+	for i := 0; i < len(keys); i++ {
+		key := keys[i]
+		delete(set, key)
+	}
+	return set
+}
+
 /**
 Everything required to implement priority queue.
 */
