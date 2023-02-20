@@ -5,9 +5,11 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"math"
 	"sync"
 
 	"go.mongodb.org/mongo-driver/mongo"
+	"golang.org/x/exp/maps"
 )
 
 /*
@@ -15,6 +17,7 @@ import (
 Optimization modes:
 0: Classic greedy
 1: Lazy greedy
+2: Distributed submodular cover (DisCover) using GreeDi & lazygreedy as subroutines
 */
 func SubmodularCover(dbName string, collectionName string, coverageReq int,
 	groupReqs []int, optimMode int, threads int) []int {
@@ -33,7 +36,10 @@ func SubmodularCover(dbName string, collectionName string, coverageReq int,
 	case 0:
 		return classicGreedy(collection, n, coverageTracker, groupTracker, threads)
 	case 1:
-		return lazyGreedy(collection, n, coverageTracker, groupReqs, threads)
+		candidates := rangeSlice(n)
+		return lazyGreedy(collection, coverageTracker, groupReqs, threads, -1, candidates, nil)
+	case 2:
+		return disCover(collection, n, coverageTracker, groupReqs, threads, 0.2)
 	default:
 		return []int{}
 	}
@@ -143,33 +149,34 @@ func classicGreedy(collection *mongo.Collection, n int, coverageTracker []int,
 	return coreset
 }
 
-func lazyGreedy(collection *mongo.Collection, n int, coverageTracker []int,
-	groupTracker []int, threads int) []int {
+func lazyGreedy(collection *mongo.Collection, coverageTracker []int,
+	groupTracker []int, threads int, constraint int, candidates map[int]bool, c chan []int) []int {
 	fmt.Println("Executing lazy greedy algorithm...")
 	coreset := make([]int, 0)
 	// Candidates set is a priority queue with initial gain
-	candidates := PriorityQueue{}
+	candidatesPQ := PriorityQueue{}
 	cur := getFullCursor(collection)
 	defer cur.Close(context.Background())
-	for i := 0; i < n; i++ { // Add in points with their initial gain
-		cur.Next(context.Background())
+	for cur.Next(context.Background()) { // Add in points with their initial gain
 		point := getEntryFromCursor(cur)
-		gain := marginalGain(point, coverageTracker, groupTracker, threads)
-		item := &Item{
-			value:    point.Index,
-			priority: gain,
+		if candidates[point.Index] {
+			gain := marginalGain(point, coverageTracker, groupTracker, threads)
+			item := &Item{
+				value:    point.Index,
+				priority: gain,
+			}
+			heap.Push(&candidatesPQ, item)
 		}
-		heap.Push(&candidates, item)
 	}
 
 	// Main iteration loop
 	fmt.Println("Entering the main loop...")
 	for notSatisfied(coverageTracker, groupTracker) {
 		for { // Loop while we find an optimal element
-			index := heap.Pop(&candidates).(*Item).value
+			index := heap.Pop(&candidatesPQ).(*Item).value
 			point := getPointFromDB(collection, index)
 			gain := marginalGain(point, coverageTracker, groupTracker, threads)
-			threshold := PeekPriority(&candidates)
+			threshold := PeekPriority(&candidatesPQ)
 			if gain >= threshold { // Optimal element found
 				// Add to coreset
 				coreset = append(coreset, index)
@@ -181,13 +188,106 @@ func lazyGreedy(collection *mongo.Collection, n int, coverageTracker []int,
 					value:    index,
 					priority: gain,
 				}
-				heap.Push(&candidates, item)
+				heap.Push(&candidatesPQ, item)
 			}
 		}
-		fmt.Printf("\rIteration: %d, remaining candidates: %d", len(coreset), len(candidates))
+		fmt.Printf("\rIteration: %d, remaining candidates: %d", len(coreset), len(candidatesPQ))
+		if constraint > 0 && len(coreset) >= constraint {
+			break
+		}
 	}
 	fmt.Printf("\n")
+	if c == nil {
+		return coreset
+	} else {
+		c <- coreset
+		return coreset
+	}
+}
+
+func disCover(collection *mongo.Collection, n int, coverageTracker []int,
+	groupTracker []int, threads int, alpha float64) []int {
+	fmt.Println("Executing DisCover...")
+	coreset := make([]int, 0)
+	candidates := make(map[int]bool) // Using map as a hashset
+	for i := 0; i < n; i++ {         // Initial points
+		candidates[i] = true
+	}
+	lambda := 1.0 / math.Sqrt(float64(threads))
+
+	// Main logic loop
+	fmt.Println("Entering the main loop...")
+	cardinalityConstraint := 2
+	for notSatisfied(coverageTracker, groupTracker) {
+		// Run DisCover subroutine
+		remainingBefore := sum(coverageTracker) + sum(groupTracker)
+		newSet := greeDi(candidates, coverageTracker, groupTracker, threads, cardinalityConstraint, collection)
+		// Update trackers
+		cur := getSetCursor(collection, newSet)
+		newPoints := make([]Point, len(newSet))
+		for cur.Next(context.Background()) {
+			newPoints = append(newPoints, getEntryFromCursor(cur))
+		}
+		decrementAllTrackers(newPoints, coverageTracker, groupTracker)
+		coreset = append(coreset, newSet...)
+		remainingAfter := sum(coverageTracker) + sum(groupTracker)
+		// Decide whether to double cardinality coustraint or not
+		if float64(remainingBefore-remainingAfter) < alpha*lambda*float64(remainingAfter) {
+			cardinalityConstraint *= 2 // Double if marginal gain is too small
+		}
+	}
 	return coreset
+}
+
+func greeDi(candidates map[int]bool, coverageTracker []int, groupTracker []int,
+	threads int, cardinalityConstraint int, collection *mongo.Collection) []int {
+	// Make a copy of trackers since we don't want to mess with them
+	newCoverageTracker := make([]int, len(coverageTracker))
+	newGroupTracker := make([]int, len(groupTracker))
+	copy(newCoverageTracker, coverageTracker)
+	copy(newGroupTracker, groupTracker)
+
+	// Bookkeeping stuff for goroutines
+	var wg sync.WaitGroup
+	c := make(chan []int, threads)
+
+	// Split candidates into subsets
+	splitCandidates := make([]map[int]bool, threads)
+	for i := 0; i < threads; i++ {
+		splitCandidates[i] = make(map[int]bool, len(candidates)/threads+1)
+	}
+	t := 0
+	for candidate := range candidates {
+		splitCandidates[t][candidate] = true
+		if t == threads-1 {
+			t = 0
+		} else {
+			t++
+		}
+	}
+
+	// Call centralized greedy as goroutines with split candidates
+	for i := 0; i < threads; i++ {
+		wg.Add(1)
+		go func() {
+			go lazyGreedy(collection, newCoverageTracker, newGroupTracker,
+				1, cardinalityConstraint, splitCandidates[i], c)
+		}()
+	}
+	go func() {
+		wg.Wait()
+		close(c)
+	}()
+
+	// Filtered candidates = union of solutions from each thread
+	filteredCandidates := make(map[int]bool, len(candidates))
+	for distributedSolution := range c {
+		maps.Copy(filteredCandidates, distributedSolution)
+	}
+
+	// Run centralized greedy on the filtered candidates
+	return lazyGreedy(collection, coverageTracker, groupTracker, threads,
+		cardinalityConstraint, filteredCandidates, nil)
 }
 
 func notSatisfied(coverageTracker []int, groupTracker []int) bool {
@@ -241,6 +341,13 @@ func decrementTrackers(point *Point, coverageTracker []int, groupTracker []int) 
 	gr := point.Group
 	val := groupTracker[gr]
 	groupTracker[gr] = max(0, val-1)
+}
+
+func decrementAllTrackers(points []Point, coverageTracker []int, groupTracker []int) {
+	for i := 0; i < len(points); i++ {
+		point := points[i]
+		decrementTrackers(&point, coverageTracker, groupTracker)
+	}
 }
 
 func main() {
