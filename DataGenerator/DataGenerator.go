@@ -32,9 +32,9 @@ type Point struct {
 // Essentially the same content that will be stored in MongoDB
 type PointNeighbors struct {
 	ID        primitive.ObjectID `bson:"_id,omitempty"`
-	Index     int                `bson:"index,omitempty"`
-	Group     int                `bson:"group,omitempty"`
-	Neighbors []int              `bson:"neighbors,omitempty"`
+	Index     int                `bson:"index"`
+	Group     int                `bson:"group"`
+	Neighbors []int              `bson:"neighbors"`
 }
 
 func main() {

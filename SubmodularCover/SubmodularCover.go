@@ -1,6 +1,7 @@
 package main
 
 import (
+	"container/heap"
 	"context"
 	"flag"
 	"fmt"
@@ -31,6 +32,8 @@ func SubmodularCover(dbName string, collectionName string, coverageReq int,
 	switch optimMode {
 	case 0:
 		return classicGreedy(collection, n, coverageTracker, groupTracker, threads)
+	case 1:
+		return lazyGreedy(collection, n, coverageTracker, groupReqs)
 	default:
 		return []int{}
 	}
@@ -75,10 +78,11 @@ func classicGreedy(collection *mongo.Collection, n int, coverageTracker []int,
 	chunkSize := n / threads
 
 	// Main logic
+	fmt.Println("Entering the main loop...")
 	for notSatisfied(coverageTracker, groupTracker) {
+		var wg sync.WaitGroup
 		for i := 0; i < threads; i++ { // Use multithreading
 			c := make(chan *Result, threads)
-			var wg sync.WaitGroup
 			for i := 0; i < threads; i++ { // Concurrently call threads
 				lo := i * chunkSize
 				hi := min(n, lo+chunkSize) - 1
@@ -108,6 +112,53 @@ func classicGreedy(collection *mongo.Collection, n int, coverageTracker []int,
 	return coreset
 }
 
+func lazyGreedy(collection *mongo.Collection, n int, coverageTracker []int,
+	groupTracker []int) []int {
+	fmt.Println("Executing lazy greedy algorithm...")
+	coreset := make([]int, 0)
+	// Candidates set is a priority queue with initial gain
+	candidates := PriorityQueue{}
+	cur := getFullCursor(collection)
+	defer cur.Close(context.Background())
+	for i := 0; i < n; i++ { // Add in points with their initial gain
+		cur.Next(context.Background())
+		point := getEntryFromCursor(cur)
+		gain := marginalGain(point, coverageTracker, groupTracker)
+		item := &Item{
+			value:    point.Index,
+			priority: gain,
+		}
+		heap.Push(&candidates, item)
+	}
+
+	// Main iteration loop
+	fmt.Println("Entering the main loop...")
+	for notSatisfied(coverageTracker, groupTracker) {
+		for { // Loop while we find an optimal element
+			index := heap.Pop(&candidates).(*Item).value
+			point := getPointFromDB(collection, index)
+			gain := marginalGain(point, coverageTracker, groupTracker)
+			threshold := PeekPriority(&candidates)
+			if gain >= threshold { // Optimal element found
+				// Add to coreset
+				coreset = append(coreset, index)
+				// Decrement trackers
+				decrementTrackers(&point, coverageTracker, groupTracker)
+				break
+			} else { // Add the point back to heap with updated marginal gain
+				item := &Item{
+					value:    index,
+					priority: gain,
+				}
+				heap.Push(&candidates, item)
+			}
+		}
+		fmt.Printf("\rIteration: %d, remaining candidates: %d", len(coreset), len(candidates))
+	}
+	fmt.Printf("\n")
+	return coreset
+}
+
 func notSatisfied(coverageTracker []int, groupTracker []int) bool {
 	for i := 0; i < len(groupTracker); i++ {
 		if groupTracker[i] > 0 {
@@ -126,6 +177,7 @@ func classicWorker(collection *mongo.Collection, candidates map[int]bool, covera
 	groupTracker []int, wg *sync.WaitGroup, c chan *Result, lo int, hi int) {
 	defer wg.Done()
 	cur := getRangeCursor(collection, lo, hi)
+	defer cur.Close(context.Background())
 	result := &Result{
 		index: -1,
 		gain:  -1,
