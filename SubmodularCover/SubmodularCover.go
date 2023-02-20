@@ -33,7 +33,7 @@ func SubmodularCover(dbName string, collectionName string, coverageReq int,
 	case 0:
 		return classicGreedy(collection, n, coverageTracker, groupTracker, threads)
 	case 1:
-		return lazyGreedy(collection, n, coverageTracker, groupReqs)
+		return lazyGreedy(collection, n, coverageTracker, groupReqs, threads)
 	default:
 		return []int{}
 	}
@@ -56,14 +56,45 @@ func getGroupTracker(collection *mongo.Collection, groupReqs []int) []int {
 	return groupReqs
 }
 
-func marginalGain(point Point, coverageTracker []int, groupTracker []int) int {
-	gain := 0
-	for i := 0; i < len(point.Neighbors); i++ { // Marginal gain from k-Coverage
-		n := point.Neighbors[i]
-		gain += coverageTracker[n]
+func marginalGain(point Point, coverageTracker []int, groupTracker []int, threads int) int {
+	if threads <= 1 { // Singlethreaded
+		gain := 0
+		for i := 0; i < len(point.Neighbors); i++ { // Marginal gain from k-Coverage
+			n := point.Neighbors[i]
+			gain += coverageTracker[n]
+		}
+		gain += groupTracker[point.Group] // Marginal gain from group requirement
+		return gain
+	} else { // Multithreaded
+		var wg sync.WaitGroup
+		c := make(chan int, threads)
+		chunkSize := len(point.Neighbors) / threads
+		for i := 0; i < threads; i++ {
+			lo := i * chunkSize
+			hi := min(len(point.Neighbors), lo+chunkSize)
+			wg.Add(1)
+			go gainWorker(point.Neighbors[lo:hi], coverageTracker, c, &wg)
+		}
+		go func() {
+			wg.Wait()
+			close(c)
+		}()
+		gain := 0
+		for sum := range c {
+			gain += sum
+		}
+		gain += groupTracker[point.Group]
+		return gain
 	}
-	gain += groupTracker[point.Group] // Marginal gain from group requirement
-	return gain
+}
+
+func gainWorker(points []int, coverageTracker []int, c chan int, wg *sync.WaitGroup) {
+	defer wg.Done()
+	sum := 0
+	for i := 0; i < len(points); i++ {
+		sum += coverageTracker[points[i]]
+	}
+	c <- sum
 }
 
 func classicGreedy(collection *mongo.Collection, n int, coverageTracker []int,
@@ -113,7 +144,7 @@ func classicGreedy(collection *mongo.Collection, n int, coverageTracker []int,
 }
 
 func lazyGreedy(collection *mongo.Collection, n int, coverageTracker []int,
-	groupTracker []int) []int {
+	groupTracker []int, threads int) []int {
 	fmt.Println("Executing lazy greedy algorithm...")
 	coreset := make([]int, 0)
 	// Candidates set is a priority queue with initial gain
@@ -123,7 +154,7 @@ func lazyGreedy(collection *mongo.Collection, n int, coverageTracker []int,
 	for i := 0; i < n; i++ { // Add in points with their initial gain
 		cur.Next(context.Background())
 		point := getEntryFromCursor(cur)
-		gain := marginalGain(point, coverageTracker, groupTracker)
+		gain := marginalGain(point, coverageTracker, groupTracker, threads)
 		item := &Item{
 			value:    point.Index,
 			priority: gain,
@@ -137,7 +168,7 @@ func lazyGreedy(collection *mongo.Collection, n int, coverageTracker []int,
 		for { // Loop while we find an optimal element
 			index := heap.Pop(&candidates).(*Item).value
 			point := getPointFromDB(collection, index)
-			gain := marginalGain(point, coverageTracker, groupTracker)
+			gain := marginalGain(point, coverageTracker, groupTracker, threads)
 			threshold := PeekPriority(&candidates)
 			if gain >= threshold { // Optimal element found
 				// Add to coreset
@@ -187,7 +218,7 @@ func classicWorker(collection *mongo.Collection, candidates map[int]bool, covera
 		index := point.Index
 		// If the point is a candidate AND it is assigned to thid worker thread
 		if candidates[index] {
-			gain := marginalGain(point, coverageTracker, groupTracker)
+			gain := marginalGain(point, coverageTracker, groupTracker, 1)
 			if gain > result.gain { // Update result if better marginal gain found
 				result = &Result{
 					index: index,
