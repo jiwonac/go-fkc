@@ -1,175 +1,188 @@
 package main
 
 import (
-	"container/heap"
 	"context"
 	"flag"
-	"log"
+	"fmt"
+	"sync"
 
-	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-type Point struct {
-	index     int
-	neighbors []int
-}
+/*
+*
+Optimization modes:
+0: Classic greedy
+1: Lazy greedy
+*/
+func SubmodularCover(dbName string, collectionName string, coverageReq int,
+	groupReqs []int, optimMode int, threads int) []int {
+	// Get the collection from DB
+	collection := getMongoCollection(dbName, collectionName)
+	fmt.Println("obtained collection")
 
-func removeFromSlice(s []int, i int) []int {
-	s[i] = s[len(s)-1]
-	return s[:len(s)-1]
-}
+	// Initialize trackers
+	n := getCollectionSize(collection)
+	coverageTracker := getCoverageTracker(collection, coverageReq)
+	groupTracker := getGroupTracker(collection, groupReqs)
+	fmt.Println("initialized trackers")
 
-func importMongoCollection(dbName string, collectionName string) *mongo.Collection {
-	// Create mongoDB server connection
-	clientOptions := options.Client().ApplyURI("mongodb://localhost:27017")
-	client, err := mongo.Connect(context.Background(), clientOptions)
-	if err != nil {
-		log.Fatal(err)
+	// Main logic
+	switch optimMode {
+	case 0:
+		return classicGreedy(collection, n, coverageTracker, groupTracker, threads)
+	default:
+		return []int{}
 	}
-
-	// Create handles
-	db := client.Database(dbName)
-	collection := db.Collection(collectionName)
-
-	return collection
 }
 
-func loadGraphFromCollection(collection mongo.Collection) [][]int {
-	// Query the collection and grab cursor
-	cur, err := collection.Find(context.Background(), bson.D{})
-	if err != nil {
-		log.Fatal(err)
-	}
+func getCoverageTracker(collection *mongo.Collection, coverageReq int) []int {
+	coverageTracker := make([]int, 0)
+	cur := getFullCursor(collection)
 	defer cur.Close(context.Background())
-
-	// Internal representation of the graph
-	var graph [][]int
-
-	// Iterate over cursor
 	for cur.Next(context.Background()) {
-		var entry Point
-		/*if err != cur.Decode(&entry); err != nil {
-			log.Fatal(err)
-		}*/
-		// Set the graph's element as adjacency list
-		neighborList := []int
-		for _, neighbor := range entry.neighbors {
-			neighborList.append(neighbor)
-		}
-		graph[entry.index] = neighborList
+		point := getEntryFromCursor(cur)
+		numNeighbors := len(point.Neighbors)
+		thisCoverageReq := min(numNeighbors, coverageReq)
+		coverageTracker = append(coverageTracker, thisCoverageReq)
 	}
-
-	return graph
+	return coverageTracker
 }
 
-func max(a int, b int) int {
-	if a > b {
-		return a
+func getGroupTracker(collection *mongo.Collection, groupReqs []int) []int {
+	return groupReqs
+}
+
+func marginalGain(point Point, coverageTracker []int, groupTracker []int) int {
+	gain := 0
+	for i := 0; i < len(point.Neighbors); i++ { // Marginal gain from k-Coverage
+		n := point.Neighbors[i]
+		gain += coverageTracker[n]
 	}
-	return b
+	gain += groupTracker[point.Group] // Marginal gain from group requirement
+	return gain
 }
 
-type Item struct {
-	value    int
-	priority int
-	index    int
-}
+func classicGreedy(collection *mongo.Collection, n int, coverageTracker []int,
+	groupTracker []int, threads int) []int {
+	fmt.Println("Executing classic greedy algorithm...")
+	// Initialize sets
+	coreset := make([]int, 0)
+	candidates := rangeSlice(n) // Points not in coreset
 
-type PriorityQueue []*Item
-
-func (pq PriorityQueue) Len() int { return len(pq) }
-
-func (pq PriorityQueue) Less(i, j int) bool {
-	return pq[i].priority > pq[j].priority
-}
-
-func (pq PriorityQueue) Swap(i, j int) {
-	pq[i], pq[j] = pq[j], pq[i]
-	pq[i].index = i
-	pq[j].index = j
-}
-
-func (pq *PriorityQueue) Push(x any) {
-	n := len(*pq)
-	item := x.(*Item)
-	item.index = n
-	*pq = append(*pq, item)
-}
-
-func (pq *PriorityQueue) Pop() any {
-	old := *pq
-	n := len(old)
-	item := old[n-1]
-	old[n-1] = nil  // avoid memory leak
-	item.index = -1 // for safety
-	*pq = old[0 : n-1]
-	return item
-}
-
-// update modifies the priority and value of an Item in the queue.
-func (pq *PriorityQueue) update(item *Item, value int, priority int) {
-	item.value = value
-	item.priority = priority
-	heap.Fix(pq, item.index)
-}
-
-func marginalGain(point int, coverageTracker []int, groupTracker []int) int {
-
-}
-
-/**
- * parameters:
- * graph: The graph as a slice of adjacency linked lists
- * coverageReq: k-coverage requirement
- * numGroups: total number of groups
- * groupReq: group count requirement
- * lazyLevel:
- *   0: regular greedy
- *   1: lazy greedy
- *   2: lazylazy greedy
- * layers: number of layers to use for multi-level submodular optimization speedup
- * threads: number of threads to use for concurrent evaluation
- * returns the resultant coreset
- */
-func submodularCover(graph [][]int, coverageReq int, numGroups int, groupReq int, lazyLevel int, layers int, threads int) map[int]bool {
-	// Create trackers & containers
-	n := len(graph)                   // number of points in graph
-	coverageTracker := make([]int, n) // k-coverage requirement remaining for each point
-	for i := 0; i < n; i++ {
-		coverageTracker[i] = max(coverageReq, graph[i].Len())
-	}
-	groupTracker := make([]int, numGroups) // group requirement remaining for each group
-	for i := 0; i < numGroups; i++ {
-		groupTracker[i] = groupReq
-	}
-	coreset := map[int]bool{} // use hashmap as a "hashset" for the coreset
-
-	// If using classic greedy, use a linked list of points not in coreset
-	// Otherwise, use a priority queue
-	candidatesSet := make([]int, 100)
-	candidatesPriorityQueue := make(PriorityQueue, 100)
-
-	// Initialize the candidates priority queue with initial value
-	if lazyLevel > 0 {
-		for _, point := range len(graph) {
-			gain := marginalGain(point, coverageTracker, groupTracker)
-			item := &Item{
-				value:    point,
-				priority: gain,
+	// Main logic
+	for notSatisfied(coverageTracker, groupTracker) {
+		for i := 0; i < threads; i++ { // Use multithreading
+			c := make(chan *Result, threads)
+			var wg sync.WaitGroup
+			chunkSize := (len(candidates) + threads - 1) / threads
+			for i := 0; i < threads; i++ { // Concurrently call threads
+				start := i * chunkSize
+				end := min(start+chunkSize, n)
+				wg.Add(1)
+				go classicWorker(collection, candidates[start:end],
+					coverageTracker, groupTracker, &wg, c, threads, i)
 			}
-			heap.Push(&candidatesPriorityQueue, gain)
+			go func() { // Wait for all threads to finish
+				wg.Wait()
+				close(c)
+			}()
+			// Figure out the overall maximum marginal gain element
+			chosen := getBestResult(c)
+			//fmt.Printf("%v\n", chosen)
+			// Add to coreset
+			coreset = append(coreset, chosen.index)
+			// Remove from candidates set
+			candidates = removeFromSlice(candidates, chosen.index)
+			// Decrement trackers
+			point := getPointFromDB(collection, chosen.index)
+			decrementTrackers(&point, coverageTracker, groupTracker)
+
+			fmt.Printf("\rIteration: %d", len(coreset))
 		}
 	}
-
+	fmt.Printf("\n")
 	return coreset
 }
 
-func main() {
-	dbFlag := flag.String("db", "dummydb", "The MongoDB DB")
-	collectionFlag := flag.String("collection", "random100", "The Collection containing Adjancy lists")
-	coverageFlag := flag.int("k", 5, "k-Coverage requirement")
-	groupFlag := flag.int("group", 20, "group count requirement")
+func notSatisfied(coverageTracker []int, groupTracker []int) bool {
+	for i := 0; i < len(groupTracker); i++ {
+		if groupTracker[i] > 0 {
+			return true
+		}
+	}
+	for i := 0; i < len(coverageTracker); i++ {
+		if coverageTracker[i] > 0 {
+			return true
+		}
+	}
+	return false
+}
 
+func classicWorker(collection *mongo.Collection, candidates []int, coverageTracker []int,
+	groupTracker []int, wg *sync.WaitGroup, c chan *Result, numThreads int, thread int) {
+	//fmt.Println("entered classic worker ", thread, len(candidates))
+	//fmt.Printf("%v\n", candidates)
+	defer wg.Done()
+	cur := getFullCursor(collection)
+	result := &Result{
+		thread: -1,
+		index:  -1,
+		gain:   -1,
+	}
+	for cur.Next(context.Background()) { // Iterate over query results
+		point := getEntryFromCursor(cur)
+		if point.Index%numThreads == thread {
+			gain := marginalGain(point, coverageTracker, groupTracker)
+			if gain > result.gain { // Update result if better marginal gain found
+				result = &Result{
+					thread: thread,
+					index:  point.Index,
+					gain:   gain,
+				}
+			}
+		} else {
+			continue
+		}
+	}
+	//fmt.Println("Worker ", thread, "'s best result")
+	//fmt.Printf("%v\n", result)
+	c <- result
+}
+
+func decrementTrackers(point *Point, coverageTracker []int, groupTracker []int) {
+	for i := 0; i < len(point.Neighbors); i++ {
+		n := point.Neighbors[i]
+		val := coverageTracker[n]
+		coverageTracker[n] = max(0, val-1)
+	}
+	gr := point.Group
+	val := groupTracker[gr]
+	groupTracker[gr] = max(0, val-1)
+}
+
+func main() {
+	// Define command-line flags
+	dbFlag := flag.String("db", "dummydb", "MongoDB DB")
+	collectionFlag := flag.String("col", "n1000d3m5r20", "ollection containing points")
+	coverageFlag := flag.Int("k", 20, "k-coverage requirement")
+	groupReqFlag := flag.Int("group", 100, "group count requirement")
+	groupCntFlag := flag.Int("m", 5, "number of groups")
+	optimFlag := flag.Int("optim", 0, "optimization mode")
+	threadsFlag := flag.Int("t", 1, "number of threads")
+	// Parse all flags
+	flag.Parse()
+
+	fmt.Println("Flags: ", *dbFlag, *collectionFlag, *coverageFlag, *groupReqFlag, *groupCntFlag, *optimFlag, *threadsFlag)
+
+	// Make the groupReqs array
+	groupReqs := make([]int, *groupCntFlag)
+	for i := 0; i < *groupCntFlag; i++ {
+		groupReqs[i] = *groupReqFlag
+	}
+
+	// Run submodularCover
+	result := SubmodularCover(*dbFlag, *collectionFlag, *coverageFlag, groupReqs, *optimFlag, *threadsFlag)
+	fmt.Printf("%v\n", result)
+	fmt.Println(len(result))
 }
