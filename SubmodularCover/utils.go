@@ -8,16 +8,14 @@ import (
 )
 
 type Result struct {
-	thread int
-	index  int
-	gain   int
+	index int
+	gain  int
 }
 
 func getBestResult(results chan *Result) *Result {
 	best := &Result{
-		thread: -1,
-		index:  -1,
-		gain:   -1,
+		index: -1,
+		gain:  -1,
 	}
 	for result := range results {
 		if result.gain > best.gain {

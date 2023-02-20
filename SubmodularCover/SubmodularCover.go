@@ -68,20 +68,23 @@ func classicGreedy(collection *mongo.Collection, n int, coverageTracker []int,
 	fmt.Println("Executing classic greedy algorithm...")
 	// Initialize sets
 	coreset := make([]int, 0)
-	candidates := rangeSlice(n) // Points not in coreset
+	candidates := make(map[int]bool) // Using map as a hashset
+	for i := 0; i < n; i++ {         // Initial points
+		candidates[i] = true
+	}
+	chunkSize := n / threads
 
 	// Main logic
 	for notSatisfied(coverageTracker, groupTracker) {
 		for i := 0; i < threads; i++ { // Use multithreading
 			c := make(chan *Result, threads)
 			var wg sync.WaitGroup
-			chunkSize := (len(candidates) + threads - 1) / threads
 			for i := 0; i < threads; i++ { // Concurrently call threads
-				start := i * chunkSize
-				end := min(start+chunkSize, n)
+				lo := i * chunkSize
+				hi := min(n, lo+chunkSize) - 1
 				wg.Add(1)
-				go classicWorker(collection, candidates[start:end],
-					coverageTracker, groupTracker, &wg, c, threads, i)
+				go classicWorker(collection, candidates,
+					coverageTracker, groupTracker, &wg, c, lo, hi)
 			}
 			go func() { // Wait for all threads to finish
 				wg.Wait()
@@ -93,7 +96,7 @@ func classicGreedy(collection *mongo.Collection, n int, coverageTracker []int,
 			// Add to coreset
 			coreset = append(coreset, chosen.index)
 			// Remove from candidates set
-			candidates = removeFromSlice(candidates, chosen.index)
+			delete(candidates, chosen.index)
 			// Decrement trackers
 			point := getPointFromDB(collection, chosen.index)
 			decrementTrackers(&point, coverageTracker, groupTracker)
@@ -119,34 +122,30 @@ func notSatisfied(coverageTracker []int, groupTracker []int) bool {
 	return false
 }
 
-func classicWorker(collection *mongo.Collection, candidates []int, coverageTracker []int,
-	groupTracker []int, wg *sync.WaitGroup, c chan *Result, numThreads int, thread int) {
-	//fmt.Println("entered classic worker ", thread, len(candidates))
-	//fmt.Printf("%v\n", candidates)
+func classicWorker(collection *mongo.Collection, candidates map[int]bool, coverageTracker []int,
+	groupTracker []int, wg *sync.WaitGroup, c chan *Result, lo int, hi int) {
 	defer wg.Done()
-	cur := getFullCursor(collection)
+	cur := getRangeCursor(collection, lo, hi)
 	result := &Result{
-		thread: -1,
-		index:  -1,
-		gain:   -1,
+		index: -1,
+		gain:  -1,
 	}
 	for cur.Next(context.Background()) { // Iterate over query results
 		point := getEntryFromCursor(cur)
-		if point.Index%numThreads == thread {
+		index := point.Index
+		// If the point is a candidate AND it is assigned to thid worker thread
+		if candidates[index] {
 			gain := marginalGain(point, coverageTracker, groupTracker)
 			if gain > result.gain { // Update result if better marginal gain found
 				result = &Result{
-					thread: thread,
-					index:  point.Index,
-					gain:   gain,
+					index: index,
+					gain:  gain,
 				}
 			}
 		} else {
 			continue
 		}
 	}
-	//fmt.Println("Worker ", thread, "'s best result")
-	//fmt.Printf("%v\n", result)
 	c <- result
 }
 
