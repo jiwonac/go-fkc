@@ -121,32 +121,30 @@ func classicGreedy(collection *mongo.Collection, n int, coverageTracker []int,
 	fmt.Println("Entering the main loop...")
 	for notSatisfied(coverageTracker, groupTracker) {
 		var wg sync.WaitGroup
+		c := make(chan *Result, threads)
 		for i := 0; i < threads; i++ { // Use multithreading
-			c := make(chan *Result, threads)
-			for i := 0; i < threads; i++ { // Concurrently call threads
-				lo := i * chunkSize
-				hi := min(n, lo+chunkSize) - 1
-				wg.Add(1)
-				go classicWorker(collection, candidates,
-					coverageTracker, groupTracker, &wg, c, lo, hi)
-			}
-			go func() { // Wait for all threads to finish
-				wg.Wait()
-				close(c)
-			}()
-			// Figure out the overall maximum marginal gain element
-			chosen := getBestResult(c)
-			//fmt.Printf("%v\n", chosen)
-			// Add to coreset
-			coreset = append(coreset, chosen.index)
-			// Remove from candidates set
-			delete(candidates, chosen.index)
-			// Decrement trackers
-			point := getPointFromDB(collection, chosen.index)
-			decrementTrackers(&point, coverageTracker, groupTracker)
-
-			fmt.Printf("\rIteration: %d", len(coreset))
+			lo := i * chunkSize
+			hi := min(n, lo+chunkSize) - 1
+			wg.Add(1)
+			go classicWorker(collection, candidates,
+				coverageTracker, groupTracker, &wg, c, lo, hi)
 		}
+		go func() { // Wait for all threads to finish
+			wg.Wait()
+			close(c)
+		}()
+		// Figure out the overall maximum marginal gain element
+		chosen := getBestResult(c)
+		//fmt.Printf("%v\n", chosen)
+		// Add to coreset
+		coreset = append(coreset, chosen.index)
+		// Remove from candidates set
+		delete(candidates, chosen.index)
+		// Decrement trackers
+		point := getPointFromDB(collection, chosen.index)
+		decrementTrackers(&point, coverageTracker, groupTracker)
+
+		fmt.Printf("\rIteration: %d", len(coreset))
 	}
 	fmt.Printf("\n")
 	return coreset
