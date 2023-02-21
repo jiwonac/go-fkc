@@ -34,7 +34,7 @@ type PointNeighbors struct {
 	ID        primitive.ObjectID `bson:"_id,omitempty"`
 	Index     int                `bson:"index"`
 	Group     int                `bson:"group"`
-	Neighbors []int              `bson:"neighborsc"`
+	Neighbors []int              `bson:"neighbors"`
 }
 
 func main() {
