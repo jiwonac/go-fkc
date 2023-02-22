@@ -4,10 +4,12 @@ import (
 	"bufio"
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"strconv"
 	"strings"
+	"io"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -42,13 +44,18 @@ func main() {
 	collection, client := getMongoCollection(*db, *col)
 	defer client.Disconnect(context.Background())
 	adjFileScanner, adjFile := getFileScanner(*adjFileName)
-	defer adjFile.Close()
+	//fmt.Println("got adjfile", adjFileScanner.Scan())
 	groupFileScanner, groupFile := getFileScanner(*groupFileName)
-	defer groupFile.Close()
 	//fmt.Printf("%v %v\n", adjFile, groupFile)
 
 	// Iterate over line of files
-	for i := 0; adjFileScanner.Scan() && groupFileScanner.Scan(); i++ {
+	for i := 0; true; i++ {
+		_, err1 := adjFileScanner.Peek(1)
+		_, err2 := groupFileScanner.Peek(1)
+		if err1 == io.EOF || err2 == io.EOF {
+			break
+		}
+
 		adjList := parseAdjLine(adjFileScanner)
 		group := parseGroupLine(groupFileScanner)
 
@@ -63,6 +70,9 @@ func main() {
 		handleError(err)
 	}
 
+	//handleError(adjFileScanner.Err())
+	//handleError(groupFileScanner.Err())
+
 	// Create index
 	indexModel := mongo.IndexModel{
 		Keys: bson.M{
@@ -71,6 +81,9 @@ func main() {
 	}
 	_, err := collection.Indexes().CreateOne(context.Background(), indexModel)
 	handleError(err)
+
+	adjFile.Close()
+	groupFile.Close()
 }
 
 func getMongoCollection(db string, col string) (*mongo.Collection, *mongo.Client) {
@@ -91,12 +104,14 @@ func getMongoCollection(db string, col string) (*mongo.Collection, *mongo.Client
 	return collection, client
 }
 
-func getFileScanner(fileName string) (*bufio.Scanner, *os.File) {
+func getFileScanner(fileName string) (*bufio.Reader, *os.File) {
 	file, err := os.Open(fileName)
 	handleError(err)
 
-	scanner := bufio.NewScanner(file)
-	return scanner, file
+	reader := bufio.NewReader(file)
+
+	//scanner := bufio.NewScanner(file)
+	return reader, file
 }
 
 func handleError(err error) {
@@ -105,10 +120,12 @@ func handleError(err error) {
 	}
 }
 
-func parseAdjLine(scanner bufio.Scanner) []int {
+func parseAdjLine(scanner *bufio.Reader) []int {
+	fmt.Println("parsing adjlines...")
 	ints := make([]int, 0)
 	for {
-		line := scanner.Text()
+		line, err := scanner.ReadString('\n')
+		handleError(err)
 		split := strings.Split(line, " : ")
 		if len(split) > 1 { // Index on left side
 			line = split[1]
@@ -118,7 +135,7 @@ func parseAdjLine(scanner bufio.Scanner) []int {
 		if strings.HasSuffix(line, "}") {
 			breakThisLoop = true
 		}
-		line = strings.Trim(line, "{ }")
+		line = strings.Trim(line, "{ } \n")
 		split = strings.Split(line, ", ")
 		for _, v := range split {
 			n, _ := strconv.Atoi(v)
@@ -131,8 +148,10 @@ func parseAdjLine(scanner bufio.Scanner) []int {
 	return ints
 }
 
-func parseGroupLine(scanner bufio.Scanner) int {
-	line := scanner.Text()
+func parseGroupLine(scanner *bufio.Reader) int {
+	line, err := scanner.ReadString('\n')
+	handleError(err)
+	line = strings.Trim(line, "\n")
 	parts := strings.Split(line, " : ")
 	i, err := strconv.Atoi(parts[1])
 	handleError(err)
