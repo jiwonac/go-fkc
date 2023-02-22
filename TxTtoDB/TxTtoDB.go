@@ -49,11 +49,8 @@ func main() {
 
 	// Iterate over line of files
 	for i := 0; adjFileScanner.Scan() && groupFileScanner.Scan(); i++ {
-		adjLine := adjFileScanner.Text()
-		groupLine := groupFileScanner.Text()
-		//fmt.Println(adjLine, groupLine)
-		adjList := parseAdjLine(adjLine)
-		group := parseGroupLine(groupLine)
+		adjList := parseAdjLine(adjFileScanner)
+		group := parseGroupLine(groupFileScanner)
 
 		point := &Point{
 			Index:     i,
@@ -108,20 +105,34 @@ func handleError(err error) {
 	}
 }
 
-func parseAdjLine(line string) []int {
-	parts := strings.Split(line, " : ")
-	str := strings.Trim(parts[1], "{ }")
-	strVals := strings.Split(str, ", ")
-	vals := make([]int, len(strVals))
-	for i, v := range strVals {
-		n, err := strconv.Atoi(v)
-		handleError(err)
-		vals[i] = n
+func parseAdjLine(scanner bufio.Scanner) []int {
+	ints := make([]int, 0)
+	for {
+		line := scanner.Text()
+		split := strings.Split(line, " : ")
+		if len(split) > 1 { // Index on left side
+			line = split[1]
+		}
+		line = strings.TrimSpace(line)
+		breakThisLoop := false
+		if strings.HasSuffix(line, "}") {
+			breakThisLoop = true
+		}
+		line = strings.Trim(line, "{ }")
+		split = strings.Split(line, ", ")
+		for _, v := range split {
+			n, _ := strconv.Atoi(v)
+			ints = append(ints, n)
+		}
+		if breakThisLoop {
+			break
+		}
 	}
-	return vals
+	return ints
 }
 
-func parseGroupLine(line string) int {
+func parseGroupLine(scanner bufio.Scanner) int {
+	line := scanner.Text()
 	parts := strings.Split(line, " : ")
 	i, err := strconv.Atoi(parts[1])
 	handleError(err)
