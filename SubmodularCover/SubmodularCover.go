@@ -172,29 +172,34 @@ func lazyGreedy(collection *mongo.Collection, coverageTracker []int,
 	coreset := make([]int, 0)
 	//candidatesPQ := PriorityQueue{}
 	candidatesPQ := make(PriorityQueue, len(candidates))
-	cur := getSetCursor(collection, candidates)
-	defer cur.Close(context.Background())
-	for i := 0; cur.Next(context.Background()); { // Add in points with their initial gain
-		point := getEntryFromCursor(cur)
-		if candidates[point.Index] {
-			// Either no constraint, or constraint was set and prob passes
-			gain := marginalGain(point, coverageTracker, groupTracker, threads)
-			item := &Item{
-				value:    point.Index,
-				priority: gain,
+	c2 := make(chan *Item, len(candidates))
+	var wg2 sync.WaitGroup
+	for t := 0; t < threads; t++ {
+		wg2.Add(1)
+		func() {
+			defer wg2.Done()
+			cur := getSetCursor(collection, candidates)
+			for cur.Next(context.Background()) {
+				point := getEntryFromCursor(cur)
+				gain := marginalGain(point, coverageTracker, groupTracker, 1)
+				item := &Item{
+					value:    point.Index,
+					priority: gain,
+				}
+				c2 <- item
 			}
+		}()
+		go func() { // Wait for all threads to finish
+			wg.Wait()
+			close(c)
+		}()
+		i := 0
+		for item := range c2 {
 			candidatesPQ[i] = item
 			i++
 		}
-		if print {
-			fmt.Printf("\rMarginal gain of point %d computed", i)
-		}
 	}
 	heap.Init(&candidatesPQ)
-	if print {
-		fmt.Printf("\n")
-	}
-	//fmt.Println(len(candidatesPQ))
 
 	// Main iteration loop
 	if print {
