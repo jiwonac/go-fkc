@@ -174,9 +174,22 @@ func lazyGreedy(collection *mongo.Collection, coverageTracker []int,
 	candidatesPQ := make(PriorityQueue, len(candidates))
 	c2 := make(chan *Item, len(candidates))
 	var wg2 sync.WaitGroup
+	splitCandidates := make([]map[int]bool, threads)
+	for i := 0; i < threads; i++ {
+		splitCandidates[i] = make(map[int]bool, len(candidates)/threads+1)
+	}
+	t := 0
+	for candidate := range candidates {
+		splitCandidates[t][candidate] = true
+		if t == threads-1 {
+			t = 0
+		} else {
+			t++
+		}
+	}
 	for t := 0; t < threads; t++ {
 		wg2.Add(1)
-		func() {
+		func(candidates map[int]bool) {
 			defer wg2.Done()
 			cur := getSetCursor(collection, candidates)
 			for cur.Next(context.Background()) {
@@ -188,7 +201,7 @@ func lazyGreedy(collection *mongo.Collection, coverageTracker []int,
 				}
 				c2 <- item
 			}
-		}()
+		}(splitCandidates[t])
 		go func() { // Wait for all threads to finish
 			wg.Wait()
 			close(c)
