@@ -172,7 +172,7 @@ func lazyGreedy(collection *mongo.Collection, coverageTracker []int,
 	coreset := make([]int, 0)
 	//candidatesPQ := PriorityQueue{}
 	candidatesPQ := make(PriorityQueue, len(candidates))
-	cur := getFullCursor(collection)
+	cur := getSetCursor(collection, candidates)
 	defer cur.Close(context.Background())
 	for i := 0; cur.Next(context.Background()); { // Add in points with their initial gain
 		point := getEntryFromCursor(cur)
