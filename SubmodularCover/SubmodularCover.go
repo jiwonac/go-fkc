@@ -20,14 +20,14 @@ Optimization modes:
 2: Distributed submodular cover (DisCover) using GreeDi & lazygreedy as subroutines
 */
 func SubmodularCover(dbName string, collectionName string, coverageReq int,
-	groupReqs []int, optimMode int, threads int) []int {
+	groupReqs []int, optimMode int, threads int, dense bool) []int {
 	// Get the collection from DB
 	collection := getMongoCollection(dbName, collectionName)
 	fmt.Println("obtained collection")
 
 	// Initialize trackers
 	n := getCollectionSize(collection)
-	coverageTracker := getCoverageTracker(collection, coverageReq)
+	coverageTracker := getCoverageTracker(collection, coverageReq, dense, n)
 	groupTracker := getGroupTracker(collection, groupReqs)
 	fmt.Println("initialized trackers")
 
@@ -48,19 +48,27 @@ func SubmodularCover(dbName string, collectionName string, coverageReq int,
 	}
 }
 
-func getCoverageTracker(collection *mongo.Collection, coverageReq int) []int {
-	coverageTracker := make([]int, 0)
-	cur := getFullCursor(collection)
-	defer cur.Close(context.Background())
-	for i := 0; cur.Next(context.Background()); i++ {
-		point := getEntryFromCursor(cur)
-		numNeighbors := len(point.Neighbors)
-		thisCoverageReq := min(numNeighbors, coverageReq)
-		coverageTracker = append(coverageTracker, thisCoverageReq)
-		fmt.Printf("\rCoverage tracker iteration %d", i)
+func getCoverageTracker(collection *mongo.Collection, coverageReq int, dense bool, n int) []int {
+	if dense {
+		coverageTracker := make([]int, n)
+		for i := 0; i < n; i++ {
+			coverageTracker[i] = coverageReq
+		}
+		return coverageTracker
+	} else {
+		coverageTracker := make([]int, n)
+		cur := getFullCursor(collection)
+		defer cur.Close(context.Background())
+		for i := 0; cur.Next(context.Background()); i++ {
+			point := getEntryFromCursor(cur)
+			numNeighbors := len(point.Neighbors)
+			thisCoverageReq := min(numNeighbors, coverageReq)
+			coverageTracker = append(coverageTracker, thisCoverageReq)
+			fmt.Printf("\rCoverage tracker iteration %d", i)
+		}
+		fmt.Printf("\n")
+		return coverageTracker
 	}
-	fmt.Printf("\n")
-	return coverageTracker
 }
 
 func getGroupTracker(collection *mongo.Collection, groupReqs []int) []int {
@@ -381,6 +389,7 @@ func main() {
 	groupCntFlag := flag.Int("m", 5, "number of groups")
 	optimFlag := flag.Int("optim", 0, "optimization mode")
 	threadsFlag := flag.Int("t", 1, "number of threads")
+	dense := flag.Bool("dense", true, "whether the graph is denser than the k-Coverage requirement")
 	// Parse all flags
 	flag.Parse()
 
@@ -394,7 +403,7 @@ func main() {
 
 	// Run submodularCover
 	start := time.Now()
-	result := SubmodularCover(*dbFlag, *collectionFlag, *coverageFlag, groupReqs, *optimFlag, *threadsFlag)
+	result := SubmodularCover(*dbFlag, *collectionFlag, *coverageFlag, groupReqs, *optimFlag, *threadsFlag, *dense)
 	elapsed := time.Since(start)
 	fmt.Print("Obtained solution of size ", len(result), " in ")
 	fmt.Printf("%s\n", elapsed)
