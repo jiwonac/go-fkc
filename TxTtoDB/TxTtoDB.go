@@ -5,11 +5,11 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strconv"
 	"strings"
-	"io"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -23,6 +23,7 @@ The text file has format:
 index : { neighbor, neighbor, ..., neighbor}
 Group assignment is given by another text file, of format:
 index : group
+The last line of the text files should be an empty line to avoid EOF errors.
 */
 
 type Point struct {
@@ -37,64 +38,25 @@ func main() {
 	db := flag.String("db", "dummydb", "Name of MongoDB database")
 	col := flag.String("col", "dummycol", "Name of MongoDB collection")
 	adjFileName := flag.String("adjfile", "test1.txt", "File containing adjacency lists")
-	groupFileName := flag.String("groupfile", "test2.txt", "FIle containing group assignments")
+	groupFileName := flag.String("groupfile", "test2.txt", "File containing group assignments")
+	batchSize := flag.Int("batch", 1000, "DB batch size")
 	flag.Parse()
 
 	// Access DB & files
 	collection, client := getMongoCollection(*db, *col)
-	defer client.Disconnect(context.Background())
 	adjFileScanner, adjFile := getFileScanner(*adjFileName)
-	//fmt.Println("got adjfile", adjFileScanner.Scan())
 	groupFileScanner, groupFile := getFileScanner(*groupFileName)
-	//fmt.Printf("%v %v\n", adjFile, groupFile)
+	defer client.Disconnect(context.Background())
+	defer adjFile.Close()
+	defer groupFile.Close()
 
-	// Iterate over line of files
-	for i := 0; true; i++ {
-		_, err1 := adjFileScanner.Peek(1)
-		_, err2 := groupFileScanner.Peek(1)
-		if err1 == io.EOF || err2 == io.EOF {
-			break
-		}
-
-		adjList := parseAdjLine(adjFileScanner)
-		group := parseGroupLine(groupFileScanner)
-
-		point := &Point{
-			Index:     i,
-			Group:     group,
-			Neighbors: adjList,
-		}
-
-		// Insert point to collection
-		_, err := collection.InsertOne(context.Background(), point)
-		handleError(err)
-	}
-
-	//handleError(adjFileScanner.Err())
-	//handleError(groupFileScanner.Err())
-
-	// Create index
-	indexModel := mongo.IndexModel{
-		Keys: bson.M{
-			"index": 1,
-		},
-	}
-	_, err := collection.Indexes().CreateOne(context.Background(), indexModel)
-	handleError(err)
-
-	adjFile.Close()
-	groupFile.Close()
+	insertIntoCollection(collection, adjFileScanner, groupFileScanner, *batchSize)
+	createIndex(collection)
 }
 
 func getMongoCollection(db string, col string) (*mongo.Collection, *mongo.Client) {
 	client, err := mongo.Connect(context.Background(), options.Client().ApplyURI("mongodb://localhost:27017"))
 	handleError(err)
-
-	//ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	//defer cancel()
-	//err = client.Connect(ctx)
-	//handleError(err)
-	//defer client.Disconnect(context.Background())
 
 	database := client.Database(db)
 	collection := database.Collection(col)
@@ -121,7 +83,6 @@ func handleError(err error) {
 }
 
 func parseAdjLine(scanner *bufio.Reader) []int {
-	fmt.Println("parsing adjlines...")
 	ints := make([]int, 0)
 	for {
 		line, err := scanner.ReadString('\n')
@@ -135,7 +96,7 @@ func parseAdjLine(scanner *bufio.Reader) []int {
 		if strings.HasSuffix(line, "}") {
 			breakThisLoop = true
 		}
-		line = strings.Trim(line, "{ } \n")
+		line = strings.Trim(line, "{ }\n")
 		split = strings.Split(line, ", ")
 		for _, v := range split {
 			n, _ := strconv.Atoi(v)
@@ -156,4 +117,53 @@ func parseGroupLine(scanner *bufio.Reader) int {
 	i, err := strconv.Atoi(parts[1])
 	handleError(err)
 	return i
+}
+
+func insertIntoCollection(collection *mongo.Collection,
+	adjFileScanner *bufio.Reader, groupFileScanner *bufio.Reader, batchSize int) {
+	// Iterate over line of files
+	for i := 0; true; i++ {
+		if !hasNext(adjFileScanner, groupFileScanner) {
+			return
+		}
+
+		points := make([]interface{}, batchSize)
+		for j := 0; j < batchSize; j++ {
+			adjList := parseAdjLine(adjFileScanner)
+			group := parseGroupLine(groupFileScanner)
+			point := Point{
+				Index:     batchSize*i + j,
+				Group:     group,
+				Neighbors: adjList,
+			}
+			points[j] = point
+
+			if j == batchSize-1 || !hasNext(adjFileScanner, groupFileScanner) {
+				_, err := collection.InsertMany(context.Background(), points[:j+1])
+				handleError(err)
+				fmt.Printf("\rBatch %d complete.", i)
+			}
+		}
+		fmt.Printf("\n")
+	}
+}
+
+func createIndex(collection *mongo.Collection) {
+	indexModel := mongo.IndexModel{
+		Keys: bson.M{
+			"index": 1,
+		},
+	}
+	_, err := collection.Indexes().CreateOne(context.Background(), indexModel)
+	handleError(err)
+}
+
+func hasNext(adjFileScanner *bufio.Reader, groupFileScanner *bufio.Reader) bool {
+	_, err1 := adjFileScanner.Peek(1)
+	_, err2 := groupFileScanner.Peek(1)
+	if err1 == io.EOF || err2 == io.EOF {
+		return false
+	} else {
+		return true
+	}
 }
