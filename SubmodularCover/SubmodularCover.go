@@ -170,10 +170,11 @@ func lazyGreedy(collection *mongo.Collection, coverageTracker []int,
 		fmt.Println("Executing lazy greedy algorithm...")
 	}
 	coreset := make([]int, 0)
-	candidatesPQ := PriorityQueue{}
+	//candidatesPQ := PriorityQueue{}
+	candidatesPQ := make(PriorityQueue, len(candidates))
 	cur := getFullCursor(collection)
 	defer cur.Close(context.Background())
-	for i := 0; cur.Next(context.Background()); i++ { // Add in points with their initial gain
+	for i := 0; cur.Next(context.Background()); { // Add in points with their initial gain
 		point := getEntryFromCursor(cur)
 		if candidates[point.Index] {
 			// Either no constraint, or constraint was set and prob passes
@@ -182,12 +183,14 @@ func lazyGreedy(collection *mongo.Collection, coverageTracker []int,
 				value:    point.Index,
 				priority: gain,
 			}
-			heap.Push(&candidatesPQ, item)
+			candidatesPQ[i] = item
+			i++
 		}
 		if print {
 			fmt.Printf("\rMarginal gain of point %d computed", i)
 		}
 	}
+	heap.Init(&candidatesPQ)
 	if print {
 		fmt.Printf("\n")
 	}
