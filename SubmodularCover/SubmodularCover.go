@@ -177,7 +177,7 @@ func lazyGreedy(collection *mongo.Collection, coverageTracker []int,
 		point := getEntryFromCursor(cur)
 		if candidates[point.Index] {
 			// Either no constraint, or constraint was set and prob passes
-			gain := marginalGain(point, coverageTracker, groupTracker, 1)
+			gain := marginalGain(point, coverageTracker, groupTracker, threads)
 			item := &Item{
 				value:    point.Index,
 				priority: gain,
@@ -201,7 +201,7 @@ func lazyGreedy(collection *mongo.Collection, coverageTracker []int,
 		for { // Loop while we find an optimal element
 			index := heap.Pop(&candidatesPQ).(*Item).value
 			point := getPointFromDB(collection, index)
-			gain := marginalGain(point, coverageTracker, groupTracker, 1)
+			gain := marginalGain(point, coverageTracker, groupTracker, threads)
 			if len(candidatesPQ) == 0 || gain >= PeekPriority(&candidatesPQ) { // Optimal element found
 				// Add to coreset
 				coreset = append(coreset, index)
@@ -251,13 +251,6 @@ func disCover(collection *mongo.Collection, n int, coverageTracker []int,
 		// Run DisCover subroutine
 		remainingBefore := sum(coverageTracker) + sum(groupTracker)
 		newSet := greeDi(candidates, coverageTracker, groupTracker, threads, cardinalityConstraint, collection)
-		// Update trackers
-		//cur := getSetCursor(collection, newSet)
-		//newPoints := make([]Point, len(newSet))
-		//for cur.Next(context.Background()) {
-		//	newPoints = append(newPoints, getEntryFromCursor(cur))
-		//}
-		//decrementAllTrackers(newPoints, coverageTracker, groupTracker)
 		coreset = append(coreset, newSet...)
 		candidates = deleteAllFromSet(candidates, newSet)
 		remainingAfter := sum(coverageTracker) + sum(groupTracker)
