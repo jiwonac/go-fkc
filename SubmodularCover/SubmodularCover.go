@@ -52,12 +52,14 @@ func getCoverageTracker(collection *mongo.Collection, coverageReq int) []int {
 	coverageTracker := make([]int, 0)
 	cur := getFullCursor(collection)
 	defer cur.Close(context.Background())
-	for cur.Next(context.Background()) {
+	for i := 0; cur.Next(context.Background()); i++ {
 		point := getEntryFromCursor(cur)
 		numNeighbors := len(point.Neighbors)
 		thisCoverageReq := min(numNeighbors, coverageReq)
 		coverageTracker = append(coverageTracker, thisCoverageReq)
+		fmt.Printf("\rCoverage tracker iteration %d", i)
 	}
+	fmt.Printf("\n")
 	return coverageTracker
 }
 
