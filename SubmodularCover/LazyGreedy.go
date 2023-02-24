@@ -2,7 +2,6 @@ package main
 
 import (
 	"container/heap"
-	"context"
 	"strconv"
 
 	"go.mongodb.org/mongo-driver/mongo"
@@ -63,6 +62,12 @@ func lazyGreedy(collection *mongo.Collection, coverageTracker []int,
 			if len(candidatesPQ) == 0 || gain >= PeekPriority(&candidatesPQ) {
 				coreset = append(coreset, index)
 				decrementTrackers(&point, coverageTracker, groupTracker)
+				report("\rIteration "+strconv.Itoa(i)+" complete with marginal gain "+strconv.Itoa(gain), print)
+				if gain == 0 {
+					//fmt.Printf("%v\n", candidatesPQ)
+					//fmt.Printf("%v %v %v\n", coverageTracker, groupTracker, notSatisfied(coverageTracker, groupTracker))
+					//fmt.Printf("%v\n", notSatisfiedIndices(coverageTracker))
+				}
 				break // End search
 			} else { // Add the point back to heap with updated marginal gain
 				item := &Item{
@@ -72,28 +77,7 @@ func lazyGreedy(collection *mongo.Collection, coverageTracker []int,
 				heap.Push(&candidatesPQ, item)
 			}
 		}
-		report("\rIteration "+strconv.Itoa(i)+" complete", print)
 	}
 	report("\n", print)
 	return coreset
-}
-
-func getMarginalGains(collection *mongo.Collection, coverageTracker []int,
-	groupTracker []int, candidates map[int]bool) []*Item {
-	// Query the database
-	cur := getSetCursor(collection, candidates)
-	defer cur.Close(context.Background())
-
-	// Get results by iterating the cursor
-	results := make([]*Item, 0)
-	for cur.Next(context.Background()) {
-		point := getEntryFromCursor(cur)
-		gain := marginalGain(point, coverageTracker, groupTracker, 1)
-		item := &Item{
-			value:    point.Index,
-			priority: gain,
-		}
-		results = append(results, item)
-	}
-	return results
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 
 	"go.mongodb.org/mongo-driver/mongo"
@@ -50,7 +51,10 @@ func classicGreedy(collection *mongo.Collection, coverageTracker []int,
 		delete(candidates, chosen.index)
 		point := getPointFromDB(collection, chosen.index)
 		decrementTrackers(&point, coverageTracker, groupTracker)
-		report("\rIteration: "+strconv.Itoa(len(coreset)), print)
+		report("\rIteration: "+strconv.Itoa(len(coreset))+" complete with marginal gain "+strconv.Itoa(chosen.gain), print)
+		if chosen.gain == 0 {
+			fmt.Printf("%v %v\n", coverageTracker, groupTracker)
+		}
 	}
 	report("\n", print)
 	return coreset

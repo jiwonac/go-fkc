@@ -4,6 +4,7 @@ import (
 	"container/heap"
 	"fmt"
 	"log"
+	"math/rand"
 	"reflect"
 	"sync"
 
@@ -141,6 +142,48 @@ func splitSet(set map[int]bool, threads int) []map[int]bool {
 	for key := range set {
 		assign := i % threads
 		result[assign][key] = true
+		i++
+	}
+	return result
+}
+
+func subSampleSet(set map[int]bool, size int) map[int]bool {
+	result := make(map[int]bool, size)
+	i := 0
+	for item := range set {
+		prob := float64(size-len(result)) / float64(len(set)-i)
+		if rand.Float64() <= prob { // Success
+			result[item] = true
+		}
+		i++
+	}
+	return result
+}
+
+func notSatisfiedIndices(coverageTracker []int) []int {
+	result := make([]int, 0)
+	for i := 0; i < len(coverageTracker); i++ {
+		if coverageTracker[i] > 0 {
+			result = append(result, i)
+		}
+	}
+	return result
+}
+
+func sliceToSet(slice []int) map[int]bool {
+	result := make(map[int]bool, len(slice))
+	for i := 0; i < len(slice); i++ {
+		result[slice[i]] = true
+	}
+	return result
+}
+
+func setMinus(foo map[int]bool, bar map[int]bool) map[int]bool {
+	result := make(map[int]bool, len(foo)-len(bar))
+	for item := range foo {
+		if !bar[item] {
+			result[item] = true
+		}
 	}
 	return result
 }
@@ -153,6 +196,14 @@ type Item struct {
 	value    int
 	priority int
 	index    int
+}
+
+func getEmptyItem() *Item {
+	return &Item{
+		value:    -1,
+		priority: -1,
+		index:    0,
+	}
 }
 
 type PriorityQueue []*Item
@@ -196,6 +247,11 @@ func (pq *PriorityQueue) update(item *Item, value int, priority int) {
 
 func PeekPriority(pq *PriorityQueue) int {
 	return (*pq)[0].priority
+}
+
+func removeFromPQ(pq *PriorityQueue, pos int) {
+	pq.Swap(pos, len(*pq)-1)
+	pq.Pop()
 }
 
 /**

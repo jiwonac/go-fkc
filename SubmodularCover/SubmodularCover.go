@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
-	"time"
 
 	"go.mongodb.org/mongo-driver/mongo"
 )
@@ -14,6 +12,8 @@ import (
 Optimization modes:
 0: Classic greedy
 1: Lazy greedy
+2: Lazy Lazy greedy
+3: Multilevel with lazylazy -> lazy
 2: Distributed submodular cover (DisCover) using GreeDi & lazygreedy as subroutines
 */
 func SubmodularCover(dbName string, collectionName string, coverageReq int,
@@ -24,18 +24,27 @@ func SubmodularCover(dbName string, collectionName string, coverageReq int,
 
 	// Initialize trackers
 	n := getCollectionSize(collection)
+	fmt.Println(n)
 	coverageTracker := getCoverageTracker(collection, coverageReq, dense, n)
-	groupTracker := groupReqs
+	fmt.Println(len(coverageTracker))
 	report("initialized trackers\n", true)
 
 	// Choose algorithm to run
 	switch optimMode {
 	case 0:
-		return classicGreedy(collection, coverageTracker, groupTracker, rangeSet(n), -1, threads, true)
+		return classicGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true)
 	case 1:
-		return lazyGreedy(collection, coverageTracker, groupTracker, rangeSet(n), -1, threads, true)
+		return lazyGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true)
+	case 2:
+		return lazyLazyGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true, 0.1, 1.0)
+	case 3:
+		firstStage := lazyLazyGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true, 0.1, 0.5)
+		candidates := setMinus(rangeSet(n), sliceToSet(firstStage))
+		fmt.Println("candidates: ", len(candidates))
+		secondStage := lazyGreedy(collection, coverageTracker, groupReqs, candidates, -1, threads, true)
+		return append(firstStage, secondStage...)
 	//case 2:
-	//	return disCover(collection, n, coverageTracker, groupReqs, threads, 0.5)
+	//	return disCover(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true, 0)
 	default:
 		return []int{}
 	}
@@ -47,9 +56,10 @@ func getCoverageTracker(collection *mongo.Collection, coverageReq int, dense boo
 		for i := 0; i < n; i++ {
 			coverageTracker[i] = coverageReq
 		}
+		fmt.Println(len(coverageTracker))
 		return coverageTracker
 	} else {
-		coverageTracker := make([]int, n)
+		coverageTracker := make([]int, 0)
 		cur := getFullCursor(collection)
 		defer cur.Close(context.Background())
 		for i := 0; cur.Next(context.Background()); i++ {
@@ -107,6 +117,26 @@ func gainWorker(points []int, coverageTracker []int) int {
 	return sum
 }
 
+func getMarginalGains(collection *mongo.Collection, coverageTracker []int,
+	groupTracker []int, candidates map[int]bool) []*Item {
+	// Query the database
+	cur := getSetCursor(collection, candidates)
+	defer cur.Close(context.Background())
+
+	// Get results by iterating the cursor
+	results := make([]*Item, 0)
+	for cur.Next(context.Background()) {
+		point := getEntryFromCursor(cur)
+		gain := marginalGain(point, coverageTracker, groupTracker, 1)
+		item := &Item{
+			value:    point.Index,
+			priority: gain,
+		}
+		results = append(results, item)
+	}
+	return results
+}
+
 func notSatisfied(coverageTracker []int, groupTracker []int) bool {
 	for i := 0; i < len(groupTracker); i++ {
 		if groupTracker[i] > 0 {
@@ -137,32 +167,4 @@ func decrementAllTrackers(points []Point, coverageTracker []int, groupTracker []
 		point := points[i]
 		decrementTrackers(&point, coverageTracker, groupTracker)
 	}
-}
-
-func main() {
-	// Define command-line flags
-	dbFlag := flag.String("db", "dummydb", "MongoDB DB")
-	collectionFlag := flag.String("col", "n1000d3m5r20", "ollection containing points")
-	coverageFlag := flag.Int("k", 20, "k-coverage requirement")
-	groupReqFlag := flag.Int("group", 100, "group count requirement")
-	groupCntFlag := flag.Int("m", 5, "number of groups")
-	optimFlag := flag.Int("optim", 0, "optimization mode")
-	threadsFlag := flag.Int("t", 1, "number of threads")
-	dense := flag.Bool("dense", true, "whether the graph is denser than the k-Coverage requirement")
-
-	// Parse all flags
-	flag.Parse()
-
-	// Make the groupReqs array
-	groupReqs := make([]int, *groupCntFlag)
-	for i := 0; i < *groupCntFlag; i++ {
-		groupReqs[i] = *groupReqFlag
-	}
-
-	// Run submodularCover
-	start := time.Now()
-	result := SubmodularCover(*dbFlag, *collectionFlag, *coverageFlag, groupReqs, *optimFlag, *threadsFlag, *dense)
-	elapsed := time.Since(start)
-	fmt.Print("Obtained solution of size ", len(result), " in ")
-	fmt.Printf("%s\n", elapsed)
 }
