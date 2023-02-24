@@ -2,28 +2,47 @@ package main
 
 import (
 	"container/heap"
+	"fmt"
 	"log"
+	"reflect"
+	"sync"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
+
+/**
+Utility related to reasoning about the result of a marginal gain evaluation
+*/
 
 type Result struct {
 	index int
 	gain  int
 }
 
-func getBestResult(results chan *Result) *Result {
-	best := &Result{
+func setEmptyResult() *Result {
+	return &Result{
 		index: -1,
 		gain:  -1,
 	}
-	for result := range results {
-		if result.gain > best.gain {
-			best = result
+}
+
+func getBestResult(results chan interface{}) *Result {
+	best := setEmptyResult()
+	for r := range results {
+		if res, ok := r.(*Result); ok {
+			if res.gain > best.gain {
+				best = res
+			}
+		} else {
+			fmt.Println("Interpret error")
 		}
 	}
 	return best
 }
+
+/**
+The type of a database entry.
+*/
 
 type Point struct {
 	ID        primitive.ObjectID `bson:"_id"`
@@ -31,6 +50,10 @@ type Point struct {
 	Group     int                `bson:"group"`
 	Neighbors []int              `bson:"neighbors"`
 }
+
+/**
+Miscellaneous functions.
+*/
 
 // Very basic error handling
 func handleError(err error) {
@@ -79,12 +102,47 @@ func rangeSlice(n int) []int {
 	return result
 }
 
+func rangeSet(n int) map[int]bool {
+	result := make(map[int]bool, n)
+	for i := 0; i < n; i++ {
+		result[i] = true
+	}
+	return result
+}
+
 func deleteAllFromSet(set map[int]bool, keys []int) map[int]bool {
 	for i := 0; i < len(keys); i++ {
 		key := keys[i]
 		delete(set, key)
 	}
 	return set
+}
+
+func report(message string, print bool) {
+	if print {
+		fmt.Printf(message)
+	}
+}
+
+func mapToSlice(set map[int]bool) []int {
+	keys := make([]int, 0)
+	for k := range set {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func splitSet(set map[int]bool, threads int) [][]int {
+	result := make([][]int, threads)
+	for i := 0; i < threads; i++ {
+		result[i] = make([]int, 0)
+	}
+	i := 0
+	for key := range set {
+		assign := i % threads
+		result[assign] = append(result[assign], key)
+	}
+	return result
 }
 
 /**
@@ -142,52 +200,26 @@ func PeekPriority(pq *PriorityQueue) int {
 }
 
 /**
-Test method for priority queue.
+Concurrency
 */
-/*
-func main() {
-	pq := make(PriorityQueue, 0)
-	item1 := &Item{
-		value:    1,
-		priority: 10,
+
+func concurrentlyExecute(f interface{}, args [][]interface{}) chan interface{} {
+	threads := len(args)
+	results := make(chan interface{}, threads)
+	var wg sync.WaitGroup
+	for t := 0; t < threads; t++ {
+		wg.Add(1)
+		go func(args []interface{}) {
+			argValues := make([]reflect.Value, len(args))
+			for i, arg := range args {
+				argValues[i] = reflect.ValueOf(arg)
+			}
+			result := reflect.ValueOf(f).Call(argValues)[0].Interface()
+			results <- result
+			wg.Done()
+		}(args[t])
 	}
-	heap.Push(&pq, item1)
-	item2 := &Item{
-		value:    2,
-		priority: 5,
-	}
-	heap.Push(&pq, item2)
-	item3 := &Item{
-		value:    3,
-		priority: 8,
-	}
-	heap.Push(&pq, item3)
-	items := make([]int, 0)
-	for i := 0; i < 3; i++ {
-		item := heap.Pop(&pq).(*Item)
-		items = append(items, item.value)
-	}
-	fmt.Printf("%v\n", items)
-	item4 := &Item{
-		value:    4,
-		priority: 10,
-	}
-	heap.Push(&pq, item4)
-	item5 := &Item{
-		value:    5,
-		priority: 5,
-	}
-	heap.Push(&pq, item5)
-	item6 := &Item{
-		value:    6,
-		priority: 8,
-	}
-	heap.Push(&pq, item6)
-	items = make([]int, 0)
-	for i := 0; i < 3; i++ {
-		item := heap.Pop(&pq).(*Item)
-		items = append(items, item.value)
-	}
-	fmt.Printf("%v\n", items)
+	wg.Wait()
+	close(results)
+	return results
 }
-*/

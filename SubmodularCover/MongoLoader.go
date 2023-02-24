@@ -39,13 +39,13 @@ func getEntryFromCursor(cur *mongo.Cursor) Point {
 }
 
 func getSetCursor(collection *mongo.Collection, set map[int]bool) *mongo.Cursor {
-	keys := make([]int, 0)
-	for k := range set {
-		keys = append(keys, k)
-	}
+	return getSliceCursor(collection, mapToSlice(set))
+}
+
+func getSliceCursor(collection *mongo.Collection, slice []int) *mongo.Cursor {
 	filter := bson.M{
 		"index": bson.M{
-			"$in": keys,
+			"$in": slice,
 		},
 	}
 	return getCursorFilter(collection, filter)
