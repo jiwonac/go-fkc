@@ -51,26 +51,28 @@ func lazyGreedy(collection *mongo.Collection, coverageTracker []int,
 	// Repeat main loop until all trackers are complete, or the candidate pool
 	// is dried out, or cardinality constraint is met
 	report("Entering the main loop...\n", print)
-	for i := 0; notSatisfied(coverageTracker, groupTracker) && len(candidatesPQ) > 0 && (constraint > 0 || len(coreset) < constraint); i++ {
-		// Get the next candidate point & its marginal gain
-		index := heap.Pop(&candidatesPQ).(*Item).value
-		point := getPointFromDB(collection, index)
-		gain := marginalGain(point, coverageTracker, groupTracker, 1)
+	for i := 0; notSatisfied(coverageTracker, groupTracker) && len(candidatesPQ) > 0 && (constraint < 0 || len(coreset) < constraint); i++ {
+		for true {
+			// Get the next candidate point & its marginal gain
+			index := heap.Pop(&candidatesPQ).(*Item).value
+			point := getPointFromDB(collection, index)
+			gain := marginalGain(point, coverageTracker, groupTracker, 1)
 
-		// Optimal element found if it's the last possible option or
-		// if its marginal gain is optimal
-		if len(candidatesPQ) == 0 || gain >= PeekPriority(&candidatesPQ) {
-			coreset = append(coreset, index)
-			decrementTrackers(&point, coverageTracker, groupTracker)
-			break // End search
-		} else { // Add the point back to heap with updated marginal gain
-			item := &Item{
-				value:    index,
-				priority: gain,
+			// Optimal element found if it's the last possible option or
+			// if its marginal gain is optimal
+			if len(candidatesPQ) == 0 || gain >= PeekPriority(&candidatesPQ) {
+				coreset = append(coreset, index)
+				decrementTrackers(&point, coverageTracker, groupTracker)
+				break // End search
+			} else { // Add the point back to heap with updated marginal gain
+				item := &Item{
+					value:    index,
+					priority: gain,
+				}
+				heap.Push(&candidatesPQ, item)
 			}
-			heap.Push(&candidatesPQ, item)
 		}
-		report("Iteration "+strconv.Itoa(i)+" complete", print)
+		report("\rIteration "+strconv.Itoa(i)+" complete", print)
 	}
 	report("\n", print)
 	return coreset

@@ -132,15 +132,15 @@ func mapToSlice(set map[int]bool) []int {
 	return keys
 }
 
-func splitSet(set map[int]bool, threads int) [][]int {
-	result := make([][]int, threads)
+func splitSet(set map[int]bool, threads int) []map[int]bool {
+	result := make([]map[int]bool, threads)
 	for i := 0; i < threads; i++ {
-		result[i] = make([]int, 0)
+		result[i] = make(map[int]bool, len(set)/threads+1)
 	}
 	i := 0
 	for key := range set {
 		assign := i % threads
-		result[assign] = append(result[assign], key)
+		result[assign][key] = true
 	}
 	return result
 }
@@ -195,12 +195,11 @@ func (pq *PriorityQueue) update(item *Item, value int, priority int) {
 }
 
 func PeekPriority(pq *PriorityQueue) int {
-	item := (*pq)[0]
-	return item.priority
+	return (*pq)[0].priority
 }
 
 /**
-Concurrency
+Concurrency wrapper to avoid rewriting the same boilerplate code
 */
 
 func concurrentlyExecute(f interface{}, args [][]interface{}) chan interface{} {
