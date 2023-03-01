@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 
 	"go.mongodb.org/mongo-driver/mongo"
@@ -21,12 +20,13 @@ func lazyLazyGreedy(collection *mongo.Collection, coverageTracker []int,
 	s := int(eps * float64(n))
 	coreset := make([]int, 0)
 	initialObj := sum(coverageTracker) + sum(groupTracker)
-	fmt.Println(initialObj)
+	objScore := int((1 - objRatio) * float64(initialObj))
 
 	// Repeat main loop until all trackers are complete, or the candidate pool
 	// is dried out, or cardinality constraint is met
 	report("Entering the main loop...\n", print)
-	for i := 0; notSatisfied(coverageTracker, groupTracker) && len(candidates) > 0 && (constraint < 0 || len(coreset) < constraint) && (sum(coverageTracker)+sum(groupTracker) >= int(objRatio*float64(initialObj))); i++ {
+
+	for i := 0; notSatisfied(coverageTracker, groupTracker) && len(candidates) > 0 && (constraint < 0 || len(coreset) < constraint) && (remainingScore(coverageTracker, groupTracker) >= objScore); i++ {
 		// Take a subsample of the candidates
 		sample := subSampleSet(candidates, s)
 		splitSample := splitSet(sample, threads)
@@ -47,11 +47,11 @@ func lazyLazyGreedy(collection *mongo.Collection, coverageTracker []int,
 		chosen := getBestResult(results)
 
 		// Bookkeeping
-		coreset = append(coreset, chosen.gain)
+		coreset = append(coreset, chosen.index)
 		point := getPointFromDB(collection, chosen.index)
 		decrementTrackers(&point, coverageTracker, groupTracker)
 		delete(candidates, chosen.index)
-		report("\rIteration "+strconv.Itoa(i)+" complete with marignal gain "+strconv.Itoa(chosen.gain)+", remaining obj "+strconv.Itoa(sum(coverageTracker)+sum(groupTracker)), print)
+		report("\rIteration "+strconv.Itoa(i)+" complete with marignal gain "+strconv.Itoa(chosen.gain)+", remaining obj "+strconv.Itoa(sum(coverageTracker)+sum(groupTracker))+", remaining candidates"+strconv.Itoa(len(candidates)), print)
 	}
 	report("\n", print)
 	return coreset

@@ -24,25 +24,33 @@ func SubmodularCover(dbName string, collectionName string, coverageReq int,
 
 	// Initialize trackers
 	n := getCollectionSize(collection)
-	fmt.Println(n)
 	coverageTracker := getCoverageTracker(collection, coverageReq, dense, n)
-	fmt.Println(len(coverageTracker))
 	report("initialized trackers\n", true)
 
 	// Choose algorithm to run
 	switch optimMode {
 	case 0:
-		return classicGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true)
+		result := classicGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true)
+		//fmt.Printf("%v\n", result)
+		return result
 	case 1:
-		return lazyGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true)
+		result := lazyGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true)
+		//fmt.Printf("%v\n", result)
+		return result
 	case 2:
-		return lazyLazyGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true, 0.1, 1.0)
+		result := lazyLazyGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true, 0.1, 1.0)
+		//fmt.Printf("%v\n", result)
+		return result
 	case 3:
-		firstStage := lazyLazyGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true, 0.1, 0.5)
+		firstStage := lazyLazyGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true, 0.2, 0.5)
+		//report("solution size for first stage: "+strconv.Itoa(len(firstStage))+"\n", true)
+		//fmt.Printf("%v\n", firstStage)
 		candidates := setMinus(rangeSet(n), sliceToSet(firstStage))
-		fmt.Println("candidates: ", len(candidates))
+		//fmt.Println("candidates for second stage: ", len(candidates))
 		secondStage := lazyGreedy(collection, coverageTracker, groupReqs, candidates, -1, threads, true)
-		return append(firstStage, secondStage...)
+		totalSolution := append(firstStage, secondStage...)
+		//fmt.Printf("%v\n", totalSolution)
+		return totalSolution
 	//case 2:
 	//	return disCover(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true, 0)
 	default:
@@ -56,7 +64,7 @@ func getCoverageTracker(collection *mongo.Collection, coverageReq int, dense boo
 		for i := 0; i < n; i++ {
 			coverageTracker[i] = coverageReq
 		}
-		fmt.Println(len(coverageTracker))
+		//fmt.Println(len(coverageTracker))
 		return coverageTracker
 	} else {
 		coverageTracker := make([]int, 0)
@@ -138,17 +146,7 @@ func getMarginalGains(collection *mongo.Collection, coverageTracker []int,
 }
 
 func notSatisfied(coverageTracker []int, groupTracker []int) bool {
-	for i := 0; i < len(groupTracker); i++ {
-		if groupTracker[i] > 0 {
-			return true
-		}
-	}
-	for i := 0; i < len(coverageTracker); i++ {
-		if coverageTracker[i] > 0 {
-			return true
-		}
-	}
-	return false
+	return remainingScore(coverageTracker, groupTracker) > 0
 }
 
 func decrementTrackers(point *Point, coverageTracker []int, groupTracker []int) {
@@ -167,4 +165,8 @@ func decrementAllTrackers(points []Point, coverageTracker []int, groupTracker []
 		point := points[i]
 		decrementTrackers(&point, coverageTracker, groupTracker)
 	}
+}
+
+func remainingScore(coverageTracker []int, groupTracker []int) int {
+	return sum(coverageTracker) + sum(groupTracker)
 }

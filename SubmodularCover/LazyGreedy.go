@@ -2,6 +2,7 @@ package main
 
 import (
 	"container/heap"
+	"fmt"
 	"strconv"
 
 	"go.mongodb.org/mongo-driver/mongo"
@@ -15,6 +16,7 @@ func lazyGreedy(collection *mongo.Collection, coverageTracker []int,
 	groupTracker []int, candidates map[int]bool, constraint int, threads int,
 	print bool) []int {
 	report("Executing lazy greedy algorithm...\n", print)
+	fmt.Println("remaining score: ", remainingScore(coverageTracker, groupTracker))
 
 	// Initialize sets
 	n := len(candidates)
@@ -62,12 +64,7 @@ func lazyGreedy(collection *mongo.Collection, coverageTracker []int,
 			if len(candidatesPQ) == 0 || gain >= PeekPriority(&candidatesPQ) {
 				coreset = append(coreset, index)
 				decrementTrackers(&point, coverageTracker, groupTracker)
-				report("\rIteration "+strconv.Itoa(i)+" complete with marginal gain "+strconv.Itoa(gain), print)
-				if gain == 0 {
-					//fmt.Printf("%v\n", candidatesPQ)
-					//fmt.Printf("%v %v %v\n", coverageTracker, groupTracker, notSatisfied(coverageTracker, groupTracker))
-					//fmt.Printf("%v\n", notSatisfiedIndices(coverageTracker))
-				}
+				report("\rIteration "+strconv.Itoa(i)+" complete with marginal gain "+strconv.Itoa(gain)+" "+strconv.Itoa(len(candidatesPQ)), print)
 				break // End search
 			} else { // Add the point back to heap with updated marginal gain
 				item := &Item{

@@ -179,10 +179,10 @@ func sliceToSet(slice []int) map[int]bool {
 }
 
 func setMinus(foo map[int]bool, bar map[int]bool) map[int]bool {
-	result := make(map[int]bool, len(foo)-len(bar))
-	for item := range foo {
-		if !bar[item] {
-			result[item] = true
+	result := make(map[int]bool)
+	for key, _ := range foo {
+		if !bar[key] {
+			result[key] = true
 		}
 	}
 	return result
