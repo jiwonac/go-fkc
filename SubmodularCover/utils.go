@@ -49,7 +49,7 @@ type Point struct {
 	ID        primitive.ObjectID `bson:"_id"`
 	Index     int                `bson:"index"`
 	Group     int                `bson:"group"`
-	Neighbors []int              `bson:"neighbors"`
+	Neighbors []bool             `bson:"neighbors"`
 }
 
 /**

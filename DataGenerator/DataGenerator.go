@@ -34,7 +34,7 @@ type PointNeighbors struct {
 	ID        primitive.ObjectID `bson:"_id,omitempty"`
 	Index     int                `bson:"index"`
 	Group     int                `bson:"group"`
-	Neighbors []int              `bson:"neighbors"`
+	Neighbors []bool             `bson:"neighbors"`
 }
 
 func main() {
@@ -50,7 +50,7 @@ func main() {
 	fmt.Println("graphID: ", graphID)
 	points := generatePoints(*n, *d, *m)
 	adjList := adjacencyList(points, *r)
-	printStats(adjList, *n, *m)
+	//printStats(adjList, *n, *m)
 	storeMongo(adjList, *db, graphID)
 }
 
@@ -86,13 +86,11 @@ func adjacencyList(points []Point, r float64) []PointNeighbors {
 		adj := PointNeighbors{
 			Index:     i,
 			Group:     point.group,
-			Neighbors: make([]int, 0),
+			Neighbors: make([]bool, n),
 		}
 		for j := 0; j < n; j++ {
 			other := points[j]
-			if dist(point.coord, other.coord) <= r {
-				adj.Neighbors = append(adj.Neighbors, j)
-			}
+			adj.Neighbors[j] = dist(point.coord, other.coord) <= r
 		}
 		adjList[i] = adj
 	}

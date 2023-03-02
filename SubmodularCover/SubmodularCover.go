@@ -72,7 +72,12 @@ func getCoverageTracker(collection *mongo.Collection, coverageReq int, dense boo
 		defer cur.Close(context.Background())
 		for i := 0; cur.Next(context.Background()); i++ {
 			point := getEntryFromCursor(cur)
-			numNeighbors := len(point.Neighbors)
+			numNeighbors := 0
+			for i := 0; i < len(point.Neighbors); i++ {
+				if point.Neighbors[i] {
+					numNeighbors++
+				}
+			}
 			thisCoverageReq := min(numNeighbors, coverageReq)
 			coverageTracker = append(coverageTracker, thisCoverageReq)
 			fmt.Printf("\rCoverage tracker iteration %d", i)
@@ -87,8 +92,9 @@ func marginalGain(point Point, coverageTracker []int, groupTracker []int, thread
 	if threads <= 1 { // Singlethreaded
 		gain := 0
 		for i := 0; i < numNeighbors; i++ { // Marginal gain from k-Coverage
-			n := point.Neighbors[i]
-			gain += coverageTracker[n]
+			if point.Neighbors[i] {
+				gain += coverageTracker[i]
+			}
 		}
 		gain += groupTracker[point.Group] // Marginal gain from group requirement
 		return gain
@@ -151,9 +157,9 @@ func notSatisfied(coverageTracker []int, groupTracker []int) bool {
 
 func decrementTrackers(point *Point, coverageTracker []int, groupTracker []int) {
 	for i := 0; i < len(point.Neighbors); i++ {
-		n := point.Neighbors[i]
-		val := coverageTracker[n]
-		coverageTracker[n] = max(0, val-1)
+		if point.Neighbors[i] {
+			coverageTracker[i] = max(0, coverageTracker[i]-1)
+		}
 	}
 	gr := point.Group
 	val := groupTracker[gr]
