@@ -53,18 +53,18 @@ func lazyGreedy(collection *mongo.Collection, coverageTracker []int,
 	// is dried out, or cardinality constraint is met
 	report("Entering the main loop...\n", print)
 	for i := 0; notSatisfied(coverageTracker, groupTracker) && len(candidatesPQ) > 0 && (constraint < 0 || len(coreset) < constraint); i++ {
-		for true {
+		for j := 1; true; j++ {
 			// Get the next candidate point & its marginal gain
 			index := heap.Pop(&candidatesPQ).(*Item).value
 			point := getPointFromDB(collection, index)
-			gain := marginalGain(point, coverageTracker, groupTracker, 1)
+			gain := marginalGain(point, coverageTracker, groupTracker, threads)
 
 			// Optimal element found if it's the last possible option or
 			// if its marginal gain is optimal
 			if len(candidatesPQ) == 0 || gain >= PeekPriority(&candidatesPQ) {
 				coreset = append(coreset, index)
 				decrementTrackers(&point, coverageTracker, groupTracker)
-				report("\rIteration "+strconv.Itoa(i)+" complete with marginal gain "+strconv.Itoa(gain)+" "+strconv.Itoa(len(candidatesPQ)), print)
+				report("\rIteration "+strconv.Itoa(i)+" complete with marginal gain "+strconv.Itoa(gain)+", remaining candidates: "+strconv.Itoa(len(candidatesPQ))+", and elements reevaluated: "+strconv.Itoa(j), print)
 				break // End search
 			} else { // Add the point back to heap with updated marginal gain
 				item := &Item{

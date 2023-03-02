@@ -7,6 +7,7 @@ import (
 )
 
 func main() {
+
 	// Define command-line flags
 	dbFlag := flag.String("db", "dummydb", "MongoDB DB")
 	collectionFlag := flag.String("col", "n1000d3m5r20", "ollection containing points")
@@ -16,6 +17,7 @@ func main() {
 	optimFlag := flag.Int("optim", 0, "optimization mode")
 	threadsFlag := flag.Int("t", 1, "number of threads")
 	dense := flag.Bool("dense", true, "whether the graph is denser than the k-Coverage requirement")
+	//batchSize := flag.Int("batch", 10000, "number of entries to query from MongoDB at once")
 
 	// Parse all flags
 	flag.Parse()

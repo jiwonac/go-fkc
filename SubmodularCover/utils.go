@@ -135,12 +135,13 @@ func mapToSlice(set map[int]bool) []int {
 
 func splitSet(set map[int]bool, threads int) []map[int]bool {
 	result := make([]map[int]bool, threads)
+	countPerSplit := (len(set) / threads) + 1
 	for i := 0; i < threads; i++ {
-		result[i] = make(map[int]bool, len(set)/threads+1)
+		result[i] = make(map[int]bool, 0)
 	}
 	i := 0
 	for key := range set {
-		assign := i % threads
+		assign := i / countPerSplit
 		result[assign][key] = true
 		i++
 	}
@@ -246,6 +247,7 @@ func (pq *PriorityQueue) update(item *Item, value int, priority int) {
 }
 
 func PeekPriority(pq *PriorityQueue) int {
+	//return (*pq)[len(*pq)-1].priority
 	return (*pq)[0].priority
 }
 

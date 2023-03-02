@@ -42,7 +42,7 @@ func SubmodularCover(dbName string, collectionName string, coverageReq int,
 		//fmt.Printf("%v\n", result)
 		return result
 	case 3:
-		firstStage := lazyLazyGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true, 0.2, 0.5)
+		firstStage := lazyLazyGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true, 0.1, 0.8)
 		//report("solution size for first stage: "+strconv.Itoa(len(firstStage))+"\n", true)
 		//fmt.Printf("%v\n", firstStage)
 		candidates := setMinus(rangeSet(n), sliceToSet(firstStage))
@@ -108,6 +108,7 @@ func marginalGain(point Point, coverageTracker []int, groupTracker []int, thread
 			arg := []interface{}{
 				point.Neighbors[lo:hi],
 				coverageTracker,
+				lo,
 			}
 			args[t] = arg
 		}
@@ -123,10 +124,12 @@ func marginalGain(point Point, coverageTracker []int, groupTracker []int, thread
 	}
 }
 
-func gainWorker(points []int, coverageTracker []int) int {
+func gainWorker(adjMatrix []bool, coverageTracker []int, lo int) int {
 	sum := 0
-	for i := 0; i < len(points); i++ {
-		sum += coverageTracker[points[i]]
+	for i := lo; i < len(adjMatrix); i++ {
+		if adjMatrix[i] {
+			sum += coverageTracker[lo+i]
+		}
 	}
 	return sum
 }
