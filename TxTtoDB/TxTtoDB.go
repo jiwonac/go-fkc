@@ -30,7 +30,7 @@ type Point struct {
 	ID        primitive.ObjectID `bson:"_id,omitempty"`
 	Index     int                `bson:"index"`
 	Group     int                `bson:"group"`
-	Neighbors []int              `bson:"neighbors"`
+	Neighbors []bool             `bson:"neighbors"`
 }
 
 func main() {
@@ -40,6 +40,7 @@ func main() {
 	adjFileName := flag.String("adjfile", "test1.txt", "File containing adjacency lists")
 	groupFileName := flag.String("groupfile", "test2.txt", "File containing group assignments")
 	batchSize := flag.Int("batch", 1000, "DB batch size")
+	n := flag.Int("n", 50000, "total number of points in dataset")
 	flag.Parse()
 
 	// Access DB & files
@@ -50,7 +51,7 @@ func main() {
 	defer adjFile.Close()
 	defer groupFile.Close()
 
-	insertIntoCollection(collection, adjFileScanner, groupFileScanner, *batchSize)
+	insertIntoCollection(collection, adjFileScanner, groupFileScanner, *batchSize, *n)
 	createIndex(collection)
 }
 
@@ -82,7 +83,7 @@ func handleError(err error) {
 	}
 }
 
-func parseAdjLine(scanner *bufio.Reader) []int {
+func parseAdjLine(scanner *bufio.Reader, n int) []bool {
 	ints := make([]int, 0)
 	for {
 		line, err := scanner.ReadString('\n')
@@ -106,7 +107,14 @@ func parseAdjLine(scanner *bufio.Reader) []int {
 			break
 		}
 	}
-	return ints
+	matrix := make([]bool, n)
+	for i := 0; i < n; i++ {
+		matrix[i] = false
+	}
+	for i := 0; i < len(ints); i++ {
+		matrix[ints[i]] = true
+	}
+	return matrix
 }
 
 func parseGroupLine(scanner *bufio.Reader) int {
@@ -120,7 +128,7 @@ func parseGroupLine(scanner *bufio.Reader) int {
 }
 
 func insertIntoCollection(collection *mongo.Collection,
-	adjFileScanner *bufio.Reader, groupFileScanner *bufio.Reader, batchSize int) {
+	adjFileScanner *bufio.Reader, groupFileScanner *bufio.Reader, batchSize int, n int) {
 	// Iterate over line of files
 	for i := 0; true; i++ {
 		if !hasNext(adjFileScanner, groupFileScanner) {
@@ -129,7 +137,7 @@ func insertIntoCollection(collection *mongo.Collection,
 
 		points := make([]interface{}, batchSize)
 		for j := 0; j < batchSize; j++ {
-			adjList := parseAdjLine(adjFileScanner)
+			adjList := parseAdjLine(adjFileScanner, n)
 			group := parseGroupLine(groupFileScanner)
 			point := Point{
 				Index:     batchSize*i + j,
