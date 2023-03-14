@@ -14,8 +14,8 @@ func lazyLazyGreedy(collection *mongo.Collection, coverageTracker []int,
 
 	// Initialize sets & constants
 	n := len(candidates)
-	if constraint < 0 {
-		constraint = n
+	if constraint < 0 { // If cardinality constraint flag was set to -1, then
+		constraint = n // cardinality constraint is equal to n (i.e. no bound)
 	}
 	s := int(eps * float64(n))
 	coreset := make([]int, 0)
@@ -26,7 +26,7 @@ func lazyLazyGreedy(collection *mongo.Collection, coverageTracker []int,
 	// is dried out, or cardinality constraint is met
 	report("Entering the main loop...\n", print)
 
-	for i := 0; notSatisfied(coverageTracker, groupTracker) && len(candidates) > 0 && (constraint < 0 || len(coreset) < constraint) && (remainingScore(coverageTracker, groupTracker) >= objScore); i++ {
+	for i := 0; (len(coreset) < constraint) && (sum(coverageTracker)+sum(groupTracker) >= objScore); i++ {
 		// Take a subsample of the candidates
 		sample := subSampleSet(candidates, s)
 		splitSample := splitSet(sample, threads)
@@ -51,7 +51,7 @@ func lazyLazyGreedy(collection *mongo.Collection, coverageTracker []int,
 		point := getPointFromDB(collection, chosen.index)
 		decrementTrackers(&point, coverageTracker, groupTracker)
 		delete(candidates, chosen.index)
-		report("\rIteration "+strconv.Itoa(i)+" complete with marignal gain "+strconv.Itoa(chosen.gain)+", remaining obj "+strconv.Itoa(sum(coverageTracker)+sum(groupTracker))+", remaining candidates"+strconv.Itoa(len(candidates)), print)
+		report("\rIteration "+strconv.Itoa(i)+" complete with marginal gain "+strconv.Itoa(chosen.gain)+", remaining candidates"+strconv.Itoa(len(candidates)), print)
 	}
 	report("\n", print)
 	return coreset

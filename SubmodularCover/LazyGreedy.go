@@ -52,7 +52,7 @@ func lazyGreedy(collection *mongo.Collection, coverageTracker []int,
 	// Repeat main loop until all trackers are complete, or the candidate pool
 	// is dried out, or cardinality constraint is met
 	report("Entering the main loop...\n", print)
-	for i := 0; notSatisfied(coverageTracker, groupTracker) && len(candidatesPQ) > 0 && (constraint < 0 || len(coreset) < constraint); i++ {
+	for i := 0; sum(coverageTracker)+sum(groupTracker) > 0 && len(candidatesPQ) > 0 && (constraint < 0 || len(coreset) < constraint); i++ {
 		for j := 1; true; j++ {
 			// Get the next candidate point & its marginal gain
 			index := heap.Pop(&candidatesPQ).(*Item).value

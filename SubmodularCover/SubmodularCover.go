@@ -17,7 +17,7 @@ Optimization modes:
 2: Distributed submodular cover (DisCover) using GreeDi & lazygreedy as subroutines
 */
 func SubmodularCover(dbName string, collectionName string, coverageReq int,
-	groupReqs []int, optimMode int, threads int, dense bool) []int {
+	groupReqs []int, optimMode int, threads int, dense bool, eps float64, objRatio float64) []int {
 	// Get the collection from DB
 	collection := getMongoCollection(dbName, collectionName)
 	report("obtained collection\n", true)
@@ -31,28 +31,19 @@ func SubmodularCover(dbName string, collectionName string, coverageReq int,
 	switch optimMode {
 	case 0:
 		result := classicGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true)
-		//fmt.Printf("%v\n", result)
 		return result
 	case 1:
 		result := lazyGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true)
-		//fmt.Printf("%v\n", result)
 		return result
 	case 2:
-		result := lazyLazyGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true, 0.1, 1.0)
-		//fmt.Printf("%v\n", result)
+		result := lazyLazyGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true, eps, 1.0)
 		return result
 	case 3:
-		firstStage := lazyLazyGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true, 0.1, 0.8)
-		//report("solution size for first stage: "+strconv.Itoa(len(firstStage))+"\n", true)
-		//fmt.Printf("%v\n", firstStage)
+		firstStage := lazyLazyGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true, eps, objRatio)
 		candidates := setMinus(rangeSet(n), sliceToSet(firstStage))
-		//fmt.Println("candidates for second stage: ", len(candidates))
 		secondStage := lazyGreedy(collection, coverageTracker, groupReqs, candidates, -1, threads, true)
 		totalSolution := append(firstStage, secondStage...)
-		//fmt.Printf("%v\n", totalSolution)
 		return totalSolution
-	//case 2:
-	//	return disCover(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true, 0)
 	default:
 		return []int{}
 	}
@@ -155,7 +146,7 @@ func getMarginalGains(collection *mongo.Collection, coverageTracker []int,
 }
 
 func notSatisfied(coverageTracker []int, groupTracker []int) bool {
-	return remainingScore(coverageTracker, groupTracker) > 0
+	return sum(coverageTracker)+sum(groupTracker) > 0
 }
 
 func decrementTrackers(point *Point, coverageTracker []int, groupTracker []int) {
