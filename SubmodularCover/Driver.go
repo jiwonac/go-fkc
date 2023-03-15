@@ -19,6 +19,7 @@ func main() {
 	dense := flag.Bool("dense", true, "whether the graph is denser than the k-Coverage requirement")
 	eps := flag.Float64("eps", 0.1, "portion of dataset randomly sampled in each iteration of LazyLazy")
 	objRatio := flag.Float64("objratio", 0.9, "portion of objective function to be satisfied with LazyLazy before switching to Lazy")
+	iterPrint := flag.Bool("iterprint", true, "whether to report each iteration's progress")
 	//batchSize := flag.Int("batch", 10000, "number of entries to query from MongoDB at once")
 
 	// Parse all flags
@@ -32,7 +33,7 @@ func main() {
 
 	// Run submodularCover
 	start := time.Now()
-	result := SubmodularCover(*dbFlag, *collectionFlag, *coverageFlag, groupReqs, *optimFlag, *threadsFlag, *dense, *eps, *objRatio)
+	result := SubmodularCover(*dbFlag, *collectionFlag, *coverageFlag, groupReqs, *optimFlag, *threadsFlag, *dense, *eps, *objRatio, *iterPrint)
 	elapsed := time.Since(start)
 
 	// Report resultant coreset & time taken

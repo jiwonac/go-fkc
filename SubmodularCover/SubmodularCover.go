@@ -17,7 +17,7 @@ Optimization modes:
 2: Distributed submodular cover (DisCover) using GreeDi & lazygreedy as subroutines
 */
 func SubmodularCover(dbName string, collectionName string, coverageReq int,
-	groupReqs []int, optimMode int, threads int, dense bool, eps float64, objRatio float64) []int {
+	groupReqs []int, optimMode int, threads int, dense bool, eps float64, objRatio float64, print bool) []int {
 	// Get the collection from DB
 	collection := getMongoCollection(dbName, collectionName)
 	report("obtained collection\n", true)
@@ -30,18 +30,18 @@ func SubmodularCover(dbName string, collectionName string, coverageReq int,
 	// Choose algorithm to run
 	switch optimMode {
 	case 0:
-		result := classicGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true)
+		result := classicGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, print)
 		return result
 	case 1:
-		result := lazyGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true)
+		result := lazyGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, print)
 		return result
 	case 2:
-		result := lazyLazyGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true, eps, 1.0)
+		result := lazyLazyGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, print, eps, 1.0)
 		return result
 	case 3:
-		firstStage := lazyLazyGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, true, eps, objRatio)
+		firstStage := lazyLazyGreedy(collection, coverageTracker, groupReqs, rangeSet(n), -1, threads, print, eps, objRatio)
 		candidates := setMinus(rangeSet(n), sliceToSet(firstStage))
-		secondStage := lazyGreedy(collection, coverageTracker, groupReqs, candidates, -1, threads, true)
+		secondStage := lazyGreedy(collection, coverageTracker, groupReqs, candidates, -1, threads, print)
 		totalSolution := append(firstStage, secondStage...)
 		return totalSolution
 	default:
