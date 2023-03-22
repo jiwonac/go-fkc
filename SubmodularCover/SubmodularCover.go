@@ -44,6 +44,9 @@ func SubmodularCover(dbName string, collectionName string, coverageReq int,
 		secondStage := lazyGreedy(collection, coverageTracker, groupReqs, candidates, -1, threads, print)
 		totalSolution := append(firstStage, secondStage...)
 		return totalSolution
+	case 4:
+		result := disCover(collection, coverageTracker, groupReqs, threads, 0.2, print)
+		return result
 	default:
 		return []int{}
 	}

@@ -3,15 +3,16 @@ package main
 import (
 	"fmt"
 	"math"
-	"sync"
+	"strconv"
 
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-func disCover(collection *mongo.Collection, n int, coverageTracker []int,
-	groupTracker []int, threads int, alpha float64) []int {
+func disCover(collection *mongo.Collection, coverageTracker []int,
+	groupTracker []int, threads int, alpha float64, print bool) []int {
 	fmt.Println("Executing DisCover...")
 	coreset := make([]int, 0)
+	n := getCollectionSize(collection)
 	candidates := make(map[int]bool) // Using map as a hashset
 	for i := 0; i < n; i++ {         // Initial points
 		candidates[i] = true
@@ -33,7 +34,7 @@ func disCover(collection *mongo.Collection, n int, coverageTracker []int,
 			cardinalityConstraint *= 2 // Double if marginal gain is too small
 		}
 
-		fmt.Printf("\rRound: %d, remaining candidates: %d", r, len(candidates))
+		report("\rRound: "+strconv.Itoa(r)+", remaining candidates: "+strconv.Itoa(len(candidates)), print)
 	}
 	fmt.Printf("\n")
 	return coreset
@@ -47,47 +48,38 @@ func greeDi(candidates map[int]bool, coverageTracker []int, groupTracker []int,
 	copy(newCoverageTracker, coverageTracker)
 	copy(newGroupTracker, groupTracker)
 
-	// Bookkeeping stuff for goroutines
-	var wg sync.WaitGroup
-	c := make(chan []int, threads)
-
 	// Split candidates into subsets
-	splitCandidates := make([]map[int]bool, threads)
-	for i := 0; i < threads; i++ {
-		splitCandidates[i] = make(map[int]bool, len(candidates)/threads+1)
-	}
-	t := 0
-	for candidate := range candidates {
-		splitCandidates[t][candidate] = true
-		if t == threads-1 {
-			t = 0
-		} else {
-			t++
-		}
-	}
+	splitCandidates := splitSet(candidates, threads)
 
 	// Call centralized greedy as goroutines with split candidates
-	for i := 0; i < threads; i++ {
-		wg.Add(1)
-		go func(i int) {
-			go lazyGreedy(collection, newCoverageTracker, newGroupTracker,
-				1, cardinalityConstraint, splitCandidates[i], c, &wg, false)
-		}(i)
+	args := make([][]interface{}, threads)
+	for t := 0; t < threads; t++ {
+		arg := []interface{}{
+			collection,
+			newCoverageTracker,
+			newGroupTracker,
+			splitCandidates[t],
+			cardinalityConstraint,
+			1,
+			false,
+		}
+		args[t] = arg
 	}
-	go func() {
-		wg.Wait()
-		close(c)
-	}()
+
+	results := concurrentlyExecute(lazyGreedy, args)
 
 	// Filtered candidates = union of solutions from each thread
 	filteredCandidates := make(map[int]bool, cardinalityConstraint*threads)
-	for slice := range c {
-		for _, num := range slice {
-			filteredCandidates[num] = true
+	for r := range results {
+		if res, ok := r.([]int); ok {
+			for i := 0; i < len(res); i++ {
+				filteredCandidates[res[i]] = true
+			}
+		} else {
+			fmt.Println("Interpret error")
 		}
 	}
 
 	// Run centralized greedy on the filtered candidates
-	return lazyGreedy(collection, coverageTracker, groupTracker, 1,
-		cardinalityConstraint, filteredCandidates, nil, nil, false)
+	return lazyGreedy(collection, coverageTracker, groupTracker, filteredCandidates, cardinalityConstraint, threads, false)
 }
